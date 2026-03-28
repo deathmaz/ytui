@@ -1,10 +1,13 @@
 package app
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/deathmaz/ytui/internal/download"
 	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/ui/detail"
 	"github.com/deathmaz/ytui/internal/ui/picker"
@@ -35,6 +38,8 @@ var (
 )
 
 type playerErrorMsg struct{ err error }
+type downloadResultMsg struct{ result download.Result }
+type clearStatusMsg struct{ seq int }
 
 // Model is the root Bubble Tea model.
 type Model struct {
@@ -48,9 +53,13 @@ type Model struct {
 	detail     detail.Model
 	ytClient   youtube.Client
 	picker     picker.Model
-	playerCmd  string
+	playerCmd   string
+	downloadCmd string
 
 	pendingVideoURL string
+	statusMsg       string
+	statusSeq       int
+	downloading     bool
 }
 
 // New creates a new root model with the given YouTube client.
@@ -64,8 +73,9 @@ func New(client youtube.Client) *Model {
 		search:     search.New(client),
 		detail:     detail.New(client),
 		ytClient:   client,
-		picker:     picker.New(),
-		playerCmd:  "mpv",
+		picker:      picker.New(),
+		playerCmd:   "mpv",
+		downloadCmd: "yt-dlp",
 	}
 }
 
@@ -131,6 +141,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keys.Play):
 				m.openQualityPicker()
 				return m, nil
+			case key.Matches(msg, m.keys.Download):
+				return m, m.startDownload()
 			}
 		}
 
@@ -154,8 +166,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case playerErrorMsg:
-		// TODO: show error in status bar
-		_ = msg.err
+		return m, m.setStatus("Player error: "+msg.err.Error(), 5*time.Second)
+
+	case downloadResultMsg:
+		m.downloading = false
+		if msg.result.Err != nil {
+			return m, m.setStatus("Download failed: "+msg.result.Err.Error(), 5*time.Second)
+		}
+		return m, m.setStatus("Downloaded: "+msg.result.Title, 5*time.Second)
+
+	case clearStatusMsg:
+		if msg.seq == m.statusSeq {
+			m.statusMsg = ""
+		}
 	}
 
 	// Delegate to active view
@@ -184,9 +207,24 @@ func (m *Model) View() string {
 
 	tabs := m.renderTabs()
 	content := m.renderContent()
+
+	var statusLine string
+	if m.statusMsg != "" {
+		statusLine = styles.Accent.Render(m.statusMsg)
+	} else if m.downloading {
+		statusLine = styles.Dim.Render("Downloading...")
+	}
+
 	helpView := statusBarStyle.Render(m.help.View(m.keys))
 
-	return lipgloss.JoinVertical(lipgloss.Left, tabs, content, helpView)
+	var sections []string
+	sections = append(sections, tabs, content)
+	if statusLine != "" {
+		sections = append(sections, statusLine)
+	}
+	sections = append(sections, helpView)
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
 func (m *Model) switchTo(v View) {
@@ -224,6 +262,30 @@ func (m *Model) openQualityPicker() {
 	m.picker.Show(player.CommonFormats(), m.width, m.height)
 }
 
+func (m *Model) startDownload() tea.Cmd {
+	v := m.selectedVideo()
+	if v == nil || m.downloading {
+		return nil
+	}
+	m.downloading = true
+	m.statusMsg = "Downloading: " + v.Title
+	url := v.URL
+	cmd := m.downloadCmd
+	return func() tea.Msg {
+		result := download.Download(url, "", "", cmd)
+		return downloadResultMsg{result: result}
+	}
+}
+
+func (m *Model) setStatus(msg string, clearAfter time.Duration) tea.Cmd {
+	m.statusSeq++
+	m.statusMsg = msg
+	seq := m.statusSeq
+	return tea.Tick(clearAfter, func(time.Time) tea.Msg {
+		return clearStatusMsg{seq: seq}
+	})
+}
+
 func playVideoCmd(url, format, playerCmd string) tea.Cmd {
 	return func() tea.Msg {
 		if err := player.Play(url, format, playerCmd); err != nil {
@@ -234,7 +296,11 @@ func playVideoCmd(url, format, playerCmd string) tea.Cmd {
 }
 
 func (m *Model) contentHeight() int {
-	return m.height - 4 // tabs + help
+	h := m.height - 4 // tabs + help
+	if m.statusMsg != "" || m.downloading {
+		h--
+	}
+	return h
 }
 
 func (m *Model) renderTabs() string {
