@@ -263,7 +263,7 @@ func toGJSON(raw map[string]interface{}) (gjson.Result, error) {
 
 func formatSeconds(s string) string {
 	total, err := strconv.Atoi(s)
-	if err != nil || total <= 0 {
+	if err != nil || total < 0 {
 		return s
 	}
 	hours := total / 3600
