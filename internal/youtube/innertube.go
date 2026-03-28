@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	innertubego "github.com/nezbut/innertube-go"
 	"github.com/tidwall/gjson"
@@ -110,6 +111,8 @@ func (c *InnerTubeClient) IsAuthenticated() bool {
 }
 
 // parseSearchResponse extracts videos from an InnerTube search response.
+// Handles both initial responses (contents path) and continuation responses
+// (onResponseReceivedCommands path).
 func parseSearchResponse(raw map[string]interface{}) (*Page[Video], error) {
 	data, err := toGJSON(raw)
 	if err != nil {
@@ -119,9 +122,21 @@ func parseSearchResponse(raw map[string]interface{}) (*Page[Video], error) {
 	var videos []Video
 	var nextToken string
 
+	// Initial response: contents.twoColumnSearchResultsRenderer...
 	sections := data.Get("contents.twoColumnSearchResultsRenderer.primaryContents.sectionListRenderer.contents")
+
+	// Continuation response: onResponseReceivedCommands[].appendContinuationItemsAction.continuationItems
+	if !sections.Exists() {
+		data.Get("onResponseReceivedCommands").ForEach(func(_, cmd gjson.Result) bool {
+			items := cmd.Get("appendContinuationItemsAction.continuationItems")
+			if items.Exists() {
+				sections = items
+			}
+			return true
+		})
+	}
+
 	sections.ForEach(func(_, section gjson.Result) bool {
-		// Video items
 		section.Get("itemSectionRenderer.contents").ForEach(func(_, item gjson.Result) bool {
 			vr := item.Get("videoRenderer")
 			if !vr.Exists() {
@@ -131,7 +146,6 @@ func parseSearchResponse(raw map[string]interface{}) (*Page[Video], error) {
 			return true
 		})
 
-		// Continuation token
 		token := section.Get("continuationItemRenderer.continuationEndpoint.continuationCommand.token")
 		if token.Exists() {
 			nextToken = token.String()
@@ -183,11 +197,9 @@ func toGJSON(raw map[string]interface{}) (gjson.Result, error) {
 }
 
 func formatSeconds(s string) string {
-	var total int
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			total = total*10 + int(c-'0')
-		}
+	total, err := strconv.Atoi(s)
+	if err != nil || total <= 0 {
+		return s
 	}
 	hours := total / 3600
 	minutes := (total % 3600) / 60

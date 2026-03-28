@@ -16,7 +16,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(app.New(client), tea.WithAltScreen())
+	m := app.New(client)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

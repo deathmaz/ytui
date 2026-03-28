@@ -26,6 +26,7 @@ const (
 type SearchResultMsg struct {
 	Videos    []youtube.Video
 	NextToken string
+	Append    bool // true when loading more results
 	Err       error
 }
 
@@ -36,16 +37,18 @@ type VideoSelectedMsg struct {
 
 // Model is the search view model.
 type Model struct {
-	input     textinput.Model
-	results   list.Model
-	spinner   spinner.Model
-	keys      keyMap
-	focused   focus
-	searching bool
-	nextToken string
-	width     int
-	height    int
-	client    youtube.Client
+	input      textinput.Model
+	results    list.Model
+	spinner    spinner.Model
+	keys       keyMap
+	focused    focus
+	searching  bool
+	query      string
+	nextToken  string
+	loadingMore bool
+	width      int
+	height     int
+	client     youtube.Client
 }
 
 // New creates a new search view model.
@@ -113,11 +116,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if query == "" {
 				return m, nil
 			}
+			m.query = query
 			m.nextToken = ""
 			m.searching = true
 			m.focused = focusList
 			m.input.Blur()
-			return m, tea.Batch(m.spinner.Tick, m.searchCmd(query, ""))
+			return m, tea.Batch(m.spinner.Tick, m.searchCmd(query, "", false))
 
 		case key.Matches(msg, m.keys.Submit) && m.focused == focusList:
 			if item, ok := m.results.SelectedItem().(videoItem); ok {
@@ -125,24 +129,40 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return VideoSelectedMsg{Video: item.video}
 				}
 			}
+
+		case key.Matches(msg, m.keys.LoadMore) && m.focused == focusList:
+			return m, m.loadMore()
 		}
 
 	case SearchResultMsg:
 		m.searching = false
+		m.loadingMore = false
 		if msg.Err != nil {
 			return m, nil
 		}
 		m.nextToken = msg.NextToken
-		items := make([]list.Item, len(msg.Videos))
-		for i, v := range msg.Videos {
-			items[i] = videoItem{video: v}
+
+		if msg.Append {
+			existing := m.results.Items()
+			newItems := make([]list.Item, len(existing), len(existing)+len(msg.Videos))
+			copy(newItems, existing)
+			for _, v := range msg.Videos {
+				newItems = append(newItems, videoItem{video: v})
+			}
+			cmd := m.results.SetItems(newItems)
+			cmds = append(cmds, cmd)
+		} else {
+			items := make([]list.Item, len(msg.Videos))
+			for i, v := range msg.Videos {
+				items[i] = videoItem{video: v}
+			}
+			cmd := m.results.SetItems(items)
+			cmds = append(cmds, cmd)
 		}
-		cmd := m.results.SetItems(items)
-		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
-		if m.searching {
+		if m.searching || m.loadingMore {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -158,6 +178,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.results, cmd = m.results.Update(msg)
 		cmds = append(cmds, cmd)
+
+		// Auto-load more when near the bottom
+		total := len(m.results.Items())
+		if total > 0 && m.results.Index() >= total-5 {
+			cmds = append(cmds, m.loadMore())
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -173,13 +199,26 @@ func (m Model) View() string {
 		)
 	}
 
+	resultsView := m.results.View()
+	if m.loadingMore {
+		resultsView += "\n " + m.spinner.View() + " Loading more..."
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		inputView,
-		m.results.View(),
+		resultsView,
 	)
 }
 
-func (m Model) searchCmd(query, pageToken string) tea.Cmd {
+func (m *Model) loadMore() tea.Cmd {
+	if m.loadingMore || m.searching || m.nextToken == "" || m.query == "" {
+		return nil
+	}
+	m.loadingMore = true
+	return tea.Batch(m.spinner.Tick, m.searchCmd(m.query, m.nextToken, true))
+}
+
+func (m Model) searchCmd(query, pageToken string, isAppend bool) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		page, err := client.Search(context.Background(), query, pageToken)
@@ -189,8 +228,14 @@ func (m Model) searchCmd(query, pageToken string) tea.Cmd {
 		return SearchResultMsg{
 			Videos:    page.Items,
 			NextToken: page.NextToken,
+			Append:    isAppend,
 		}
 	}
+}
+
+// InputFocused reports whether the text input has focus.
+func (m Model) InputFocused() bool {
+	return m.focused == focusInput
 }
 
 // SelectedVideo returns the currently selected video, if any.

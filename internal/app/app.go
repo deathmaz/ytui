@@ -5,6 +5,8 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/deathmaz/ytui/internal/player"
+	"github.com/deathmaz/ytui/internal/ui/picker"
 	"github.com/deathmaz/ytui/internal/ui/search"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -31,6 +33,8 @@ var (
 				Foreground(styles.MidGray)
 )
 
+type playerErrorMsg struct{ err error }
+
 // Model is the root Bubble Tea model.
 type Model struct {
 	activeView View
@@ -41,26 +45,32 @@ type Model struct {
 	help       help.Model
 	search     search.Model
 	ytClient   youtube.Client
+	picker     picker.Model
+	playerCmd  string
+
+	pendingVideoURL string
 }
 
 // New creates a new root model with the given YouTube client.
-func New(client youtube.Client) Model {
+func New(client youtube.Client) *Model {
 	h := help.New()
 	h.ShortSeparator = "  "
-	return Model{
+	return &Model{
 		activeView: ViewSearch,
 		keys:       DefaultKeyMap(),
 		help:       h,
 		search:     search.New(client),
 		ytClient:   client,
+		picker:     picker.New(),
+		playerCmd:  "mpv",
 	}
 }
 
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	return m.search.Init()
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -68,39 +78,78 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.Width = msg.Width
-		contentHeight := m.height - 4 // tabs + help
-		m.search.SetSize(msg.Width, contentHeight)
+		m.search.SetSize(msg.Width, m.contentHeight())
 
 	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, m.keys.Quit):
+		// Quality picker takes priority when active
+		if m.picker.IsActive() {
+			var cmd tea.Cmd
+			m.picker, cmd = m.picker.Update(msg)
+			cmds = append(cmds, cmd)
+			return m, tea.Batch(cmds...)
+		}
+
+		// ctrl+c always quits, regardless of input focus
+		if key.Matches(msg, m.keys.ForceQuit) {
 			return m, tea.Quit
-		case key.Matches(msg, m.keys.Help):
-			m.help.ShowAll = !m.help.ShowAll
-			return m, nil
-		case key.Matches(msg, m.keys.Feed):
-			m.prevView = m.activeView
-			m.activeView = ViewFeed
-			return m, nil
-		case key.Matches(msg, m.keys.Subs):
-			m.prevView = m.activeView
-			m.activeView = ViewSubs
-			return m, nil
-		case key.Matches(msg, m.keys.Search):
-			m.prevView = m.activeView
-			m.activeView = ViewSearch
-			m.search.Focus()
-			return m, nil
-		case key.Matches(msg, m.keys.Back):
+		}
+
+		inputHasFocus := m.activeView == ViewSearch && m.search.InputFocused()
+
+		// Esc handling
+		if key.Matches(msg, m.keys.Back) && !inputHasFocus {
 			if m.activeView != ViewFeed && m.activeView != ViewSubs && m.activeView != ViewSearch {
 				m.activeView = m.prevView
 				return m, nil
 			}
 		}
 
+		// Skip single-key global bindings when text input has focus
+		if !inputHasFocus {
+			switch {
+			case key.Matches(msg, m.keys.Quit):
+				return m, tea.Quit
+			case key.Matches(msg, m.keys.Help):
+				m.help.ShowAll = !m.help.ShowAll
+				return m, nil
+			case key.Matches(msg, m.keys.Feed):
+				m.switchTo(ViewFeed)
+				return m, nil
+			case key.Matches(msg, m.keys.Subs):
+				m.switchTo(ViewSubs)
+				return m, nil
+			case key.Matches(msg, m.keys.Search):
+				m.switchTo(ViewSearch)
+				m.search.Focus()
+				return m, nil
+			case key.Matches(msg, m.keys.Play):
+				m.openQualityPicker()
+				return m, nil
+			}
+		}
+
 	case search.VideoSelectedMsg:
-		// TODO: open detail view or play
+		m.pendingVideoURL = msg.Video.URL
+		m.picker.Show(player.CommonFormats(), m.width, m.height)
 		return m, nil
+
+	case picker.SelectedMsg:
+		if m.pendingVideoURL != "" {
+			url := m.pendingVideoURL
+			format := msg.Format.ID
+			cmd := m.playerCmd
+			m.pendingVideoURL = ""
+			return m, playVideoCmd(url, format, cmd)
+		}
+		return m, nil
+
+	case picker.CancelledMsg:
+		m.pendingVideoURL = ""
+		return m, nil
+
+	case playerErrorMsg:
+		// TODO: show error in status bar
+		_ = msg.err
 	}
 
 	// Delegate to active view
@@ -114,23 +163,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) View() string {
+func (m *Model) View() string {
 	if m.width == 0 {
 		return "Loading..."
+	}
+
+	if m.picker.IsActive() {
+		return m.picker.View()
 	}
 
 	tabs := m.renderTabs()
 	content := m.renderContent()
 	helpView := statusBarStyle.Render(m.help.View(m.keys))
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		tabs,
-		content,
-		helpView,
-	)
+	return lipgloss.JoinVertical(lipgloss.Left, tabs, content, helpView)
 }
 
-func (m Model) renderTabs() string {
+func (m *Model) switchTo(v View) {
+	m.prevView = m.activeView
+	m.activeView = v
+}
+
+func (m *Model) openQualityPicker() {
+	var videoURL string
+	switch m.activeView {
+	case ViewSearch:
+		if v, ok := m.search.SelectedVideo(); ok {
+			videoURL = v.URL
+		}
+	}
+	if videoURL == "" {
+		return
+	}
+	m.pendingVideoURL = videoURL
+	m.picker.Show(player.CommonFormats(), m.width, m.height)
+}
+
+func playVideoCmd(url, format, playerCmd string) tea.Cmd {
+	return func() tea.Msg {
+		if err := player.Play(url, format, playerCmd); err != nil {
+			return playerErrorMsg{err: err}
+		}
+		return nil
+	}
+}
+
+func (m *Model) contentHeight() int {
+	return m.height - 4 // tabs + help
+}
+
+func (m *Model) renderTabs() string {
 	tabs := []struct {
 		label string
 		view  View
@@ -153,7 +235,7 @@ func (m Model) renderTabs() string {
 	return tabSeparatorStyle.Width(m.width).Render(bar)
 }
 
-func (m Model) renderContent() string {
+func (m *Model) renderContent() string {
 	switch m.activeView {
 	case ViewSearch:
 		return m.search.View()
@@ -169,10 +251,9 @@ func (m Model) renderContent() string {
 	return ""
 }
 
-func (m Model) renderPlaceholder(label string) string {
-	contentHeight := m.height - 4
+func (m *Model) renderPlaceholder(label string) string {
 	return placeholderStyle.
 		Width(m.width).
-		Height(contentHeight).
+		Height(m.contentHeight()).
 		Render(label)
 }

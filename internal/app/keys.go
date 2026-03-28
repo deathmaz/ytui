@@ -4,6 +4,7 @@ import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap defines global keybindings.
 type KeyMap struct {
+	ForceQuit  key.Binding
 	Quit       key.Binding
 	Help       key.Binding
 	Feed       key.Binding
@@ -30,7 +31,8 @@ type KeyMap struct {
 // DefaultKeyMap returns the default vim-like keybindings.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
-		Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+		ForceQuit:  key.NewBinding(key.WithKeys("ctrl+c")),
+		Quit:       key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 		Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Feed:       key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "feed")),
 		Subs:       key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "subscriptions")),
