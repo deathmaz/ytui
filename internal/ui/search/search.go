@@ -107,6 +107,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.input.Focus()
 			return m, textinput.Blink
 
+		case key.Matches(msg, m.keys.BlurInput) && m.focused == focusInput:
+			m.focused = focusList
+			m.input.Blur()
+			return m, nil
+
 		case key.Matches(msg, m.keys.Submit) && m.focused == focusInput:
 			query := m.input.Value()
 			if query == "" {

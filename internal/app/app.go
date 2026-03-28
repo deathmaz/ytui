@@ -1,12 +1,14 @@
 package app
 
 import (
+	"context"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/deathmaz/ytui/internal/auth"
 	"github.com/deathmaz/ytui/internal/download"
 	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/ui/detail"
@@ -40,6 +42,8 @@ var (
 type playerErrorMsg struct{ err error }
 type downloadResultMsg struct{ result download.Result }
 type clearStatusMsg struct{ seq int }
+type authResultMsg struct{ err error }
+type authSuccessMsg struct{ client youtube.Client }
 
 // Model is the root Bubble Tea model.
 type Model struct {
@@ -55,11 +59,13 @@ type Model struct {
 	picker     picker.Model
 	playerCmd   string
 	downloadCmd string
+	browser     string
 
 	pendingVideoURL string
 	statusMsg       string
 	statusSeq       int
 	downloading     bool
+	authenticating  bool
 }
 
 // New creates a new root model with the given YouTube client.
@@ -76,6 +82,7 @@ func New(client youtube.Client) *Model {
 		picker:      picker.New(),
 		playerCmd:   "mpv",
 		downloadCmd: "yt-dlp",
+		browser:     "brave",
 	}
 }
 
@@ -143,6 +150,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case key.Matches(msg, m.keys.Download):
 				return m, m.startDownload()
+			case key.Matches(msg, m.keys.Auth):
+				return m, m.authenticate()
 			}
 		}
 
@@ -174,6 +183,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setStatus("Download failed: "+msg.result.Err.Error(), 5*time.Second)
 		}
 		return m, m.setStatus("Downloaded: "+msg.result.Title, 5*time.Second)
+
+	case authSuccessMsg:
+		m.authenticating = false
+		m.ytClient = msg.client
+		m.search = search.New(msg.client)
+		m.detail = detail.New(msg.client)
+		m.search.SetSize(m.width, m.contentHeight())
+		m.detail.SetSize(m.width, m.contentHeight())
+		return m, m.setStatus("Authenticated via "+m.browser, 3*time.Second)
+
+	case authResultMsg:
+		m.authenticating = false
+		return m, m.setStatus("Auth failed: "+msg.err.Error(), 5*time.Second)
 
 	case clearStatusMsg:
 		if msg.seq == m.statusSeq {
@@ -284,6 +306,29 @@ func (m *Model) setStatus(msg string, clearAfter time.Duration) tea.Cmd {
 	return tea.Tick(clearAfter, func(time.Time) tea.Msg {
 		return clearStatusMsg{seq: seq}
 	})
+}
+
+func (m *Model) authenticate() tea.Cmd {
+	if m.authenticating {
+		return nil
+	}
+	if m.ytClient.IsAuthenticated() {
+		return m.setStatus("Already authenticated", 3*time.Second)
+	}
+	m.authenticating = true
+	m.statusMsg = "Authenticating via " + m.browser + "..."
+	return func() tea.Msg {
+		jar, err := auth.ExtractCookies(context.Background())
+		if err != nil {
+			return authResultMsg{err: err}
+		}
+		httpClient := auth.HTTPClient(jar)
+		newClient, err := youtube.NewInnerTubeClient(httpClient)
+		if err != nil {
+			return authResultMsg{err: err}
+		}
+		return authSuccessMsg{client: newClient}
+	}
 }
 
 func playVideoCmd(url, format, playerCmd string) tea.Cmd {

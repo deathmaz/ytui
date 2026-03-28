@@ -20,7 +20,8 @@ func VideoURL(id string) string {
 
 // InnerTubeClient implements Client using YouTube's InnerTube API.
 type InnerTubeClient struct {
-	it *innertubego.InnerTube
+	it            *innertubego.InnerTube
+	authenticated bool
 }
 
 // NewInnerTubeClient creates a new InnerTube-backed client.
@@ -30,7 +31,7 @@ func NewInnerTubeClient(httpClient *http.Client) (*InnerTubeClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("innertube init: %w", err)
 	}
-	return &InnerTubeClient{it: it}, nil
+	return &InnerTubeClient{it: it, authenticated: httpClient != nil && httpClient.Jar != nil}, nil
 }
 
 func (c *InnerTubeClient) Search(ctx context.Context, query string, pageToken string) (*Page[Video], error) {
@@ -172,7 +173,7 @@ func (c *InnerTubeClient) GetChannelVideos(ctx context.Context, channelID string
 }
 
 func (c *InnerTubeClient) IsAuthenticated() bool {
-	return false
+	return c.authenticated
 }
 
 // parseSearchResponse extracts videos from an InnerTube search response.

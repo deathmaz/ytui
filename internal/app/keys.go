@@ -26,6 +26,7 @@ type KeyMap struct {
 	Open       key.Binding
 	Yank       key.Binding
 	Refresh    key.Binding
+	Auth       key.Binding
 }
 
 // DefaultKeyMap returns the default vim-like keybindings.
@@ -53,6 +54,7 @@ func DefaultKeyMap() KeyMap {
 		Open:       key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
 		Yank:       key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Refresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
+		Auth:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "authenticate")),
 	}
 }
 
@@ -67,6 +69,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown, k.HalfPageUp, k.HalfPageDn},
 		{k.Feed, k.Subs, k.Search, k.Back},
 		{k.Play, k.Download, k.Detail, k.Comments},
-		{k.Open, k.Yank, k.Refresh, k.Quit},
+		{k.Open, k.Yank, k.Refresh, k.Auth, k.Quit},
 	}
 }
