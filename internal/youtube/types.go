@@ -2,17 +2,18 @@ package youtube
 
 // Video represents a YouTube video.
 type Video struct {
-	ID          string
-	Title       string
-	ChannelName string
-	ChannelID   string
-	Description string
-	DurationStr string
-	ViewCount   string
-	LikeCount   string
-	PublishedAt string
-	Thumbnails  []Thumbnail
-	URL         string
+	ID              string
+	Title           string
+	ChannelName     string
+	ChannelID       string
+	Description     string
+	DurationStr     string
+	ViewCount       string
+	LikeCount       string
+	PublishedAt     string
+	SubscriberCount string
+	Thumbnails      []Thumbnail
+	URL             string
 }
 
 // Channel represents a YouTube channel.

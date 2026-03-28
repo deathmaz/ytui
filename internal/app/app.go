@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/player"
+	"github.com/deathmaz/ytui/internal/ui/detail"
 	"github.com/deathmaz/ytui/internal/ui/picker"
 	"github.com/deathmaz/ytui/internal/ui/search"
 	"github.com/deathmaz/ytui/internal/ui/styles"
@@ -44,6 +45,7 @@ type Model struct {
 	keys       KeyMap
 	help       help.Model
 	search     search.Model
+	detail     detail.Model
 	ytClient   youtube.Client
 	picker     picker.Model
 	playerCmd  string
@@ -60,6 +62,7 @@ func New(client youtube.Client) *Model {
 		keys:       DefaultKeyMap(),
 		help:       h,
 		search:     search.New(client),
+		detail:     detail.New(client),
 		ytClient:   client,
 		picker:     picker.New(),
 		playerCmd:  "mpv",
@@ -79,6 +82,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.help.Width = msg.Width
 		m.search.SetSize(msg.Width, m.contentHeight())
+		m.detail.SetSize(msg.Width, m.contentHeight())
 
 	case tea.KeyMsg:
 		// Quality picker takes priority when active
@@ -122,6 +126,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.switchTo(ViewSearch)
 				m.search.Focus()
 				return m, nil
+			case key.Matches(msg, m.keys.Detail):
+				return m, m.openDetail()
 			case key.Matches(msg, m.keys.Play):
 				m.openQualityPicker()
 				return m, nil
@@ -129,9 +135,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case search.VideoSelectedMsg:
-		m.pendingVideoURL = msg.Video.URL
-		m.picker.Show(player.CommonFormats(), m.width, m.height)
-		return m, nil
+		// Enter on a video opens detail view
+		m.switchTo(ViewDetail)
+		return m, m.detail.LoadVideo(msg.Video.ID)
 
 	case picker.SelectedMsg:
 		if m.pendingVideoURL != "" {
@@ -157,6 +163,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewSearch:
 		var cmd tea.Cmd
 		m.search, cmd = m.search.Update(msg)
+		cmds = append(cmds, cmd)
+	case ViewDetail:
+		var cmd tea.Cmd
+		m.detail, cmd = m.detail.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 
@@ -184,18 +194,33 @@ func (m *Model) switchTo(v View) {
 	m.activeView = v
 }
 
-func (m *Model) openQualityPicker() {
-	var videoURL string
+func (m *Model) selectedVideo() *youtube.Video {
 	switch m.activeView {
 	case ViewSearch:
 		if v, ok := m.search.SelectedVideo(); ok {
-			videoURL = v.URL
+			return &v
 		}
+	case ViewDetail:
+		return m.detail.Video()
 	}
-	if videoURL == "" {
+	return nil
+}
+
+func (m *Model) openDetail() tea.Cmd {
+	v := m.selectedVideo()
+	if v == nil {
+		return nil
+	}
+	m.switchTo(ViewDetail)
+	return m.detail.LoadVideo(v.ID)
+}
+
+func (m *Model) openQualityPicker() {
+	v := m.selectedVideo()
+	if v == nil {
 		return
 	}
-	m.pendingVideoURL = videoURL
+	m.pendingVideoURL = v.URL
 	m.picker.Show(player.CommonFormats(), m.width, m.height)
 }
 
@@ -239,12 +264,12 @@ func (m *Model) renderContent() string {
 	switch m.activeView {
 	case ViewSearch:
 		return m.search.View()
+	case ViewDetail:
+		return m.detail.View()
 	case ViewFeed:
 		return m.renderPlaceholder("Feed - aggregated subscription videos")
 	case ViewSubs:
 		return m.renderPlaceholder("Subscriptions")
-	case ViewDetail:
-		return m.renderPlaceholder("Video Details")
 	case ViewComments:
 		return m.renderPlaceholder("Comments")
 	}

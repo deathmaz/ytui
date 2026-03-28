@@ -49,12 +49,34 @@ func (c *InnerTubeClient) Search(ctx context.Context, query string, pageToken st
 }
 
 func (c *InnerTubeClient) GetVideo(ctx context.Context, id string) (*Video, error) {
-	raw, err := c.it.Player(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("innertube player: %w", err)
+	// Fetch Player and Next endpoints in parallel
+	type playerResult struct {
+		raw map[string]interface{}
+		err error
+	}
+	type nextResult struct {
+		raw map[string]interface{}
+		err error
 	}
 
-	data, err := toGJSON(raw)
+	playerCh := make(chan playerResult, 1)
+	nextCh := make(chan nextResult, 1)
+
+	go func() {
+		raw, err := c.it.Player(ctx, id)
+		playerCh <- playerResult{raw, err}
+	}()
+	go func() {
+		raw, err := c.it.Next(ctx, &id, nil, nil, nil, nil)
+		nextCh <- nextResult{raw, err}
+	}()
+
+	pr := <-playerCh
+	if pr.err != nil {
+		return nil, fmt.Errorf("innertube player: %w", pr.err)
+	}
+
+	data, err := toGJSON(pr.raw)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +105,50 @@ func (c *InnerTubeClient) GetVideo(ctx context.Context, id string) (*Video, erro
 		return true
 	})
 
+	// Enrich with Next endpoint data (formatted views, likes, date, subscriber count)
+	nr := <-nextCh
+	if nr.err == nil {
+		enrichVideo(v, nr.raw)
+	}
+
 	return v, nil
+}
+
+func enrichVideo(v *Video, raw map[string]interface{}) {
+	data, err := toGJSON(raw)
+	if err != nil {
+		return
+	}
+
+	sections := data.Get("contents.twoColumnWatchNextResults.results.results.contents")
+	sections.ForEach(func(_, item gjson.Result) bool {
+		// Primary info: formatted views, date, likes
+		vpir := item.Get("videoPrimaryInfoRenderer")
+		if vpir.Exists() {
+			if fv := vpir.Get("viewCount.videoViewCountRenderer.viewCount.simpleText"); fv.Exists() {
+				v.ViewCount = fv.String()
+			}
+			if dt := vpir.Get("dateText.simpleText"); dt.Exists() {
+				v.PublishedAt = dt.String()
+			}
+			likes := vpir.Get("videoActions.menuRenderer.topLevelButtons.0.segmentedLikeDislikeButtonViewModel.likeButtonViewModel.likeButtonViewModel.toggleButtonViewModel.toggleButtonViewModel.defaultButtonViewModel.buttonViewModel.title")
+			if likes.Exists() {
+				v.LikeCount = likes.String()
+			}
+		}
+
+		// Secondary info: subscriber count, full description
+		vsir := item.Get("videoSecondaryInfoRenderer")
+		if vsir.Exists() {
+			if sc := vsir.Get("owner.videoOwnerRenderer.subscriberCountText.simpleText"); sc.Exists() {
+				v.SubscriberCount = sc.String()
+			}
+			if desc := vsir.Get("attributedDescription.content"); desc.Exists() {
+				v.Description = desc.String()
+			}
+		}
+		return true
+	})
 }
 
 func (c *InnerTubeClient) GetComments(ctx context.Context, videoID string, pageToken string) (*Page[Comment], error) {

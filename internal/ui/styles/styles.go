@@ -1,6 +1,9 @@
 package styles
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/lipgloss"
+)
 
 var (
 	// Colors
@@ -34,3 +37,11 @@ var (
 	Success = lipgloss.NewStyle().
 		Foreground(Green)
 )
+
+// NewSpinner creates a consistently styled spinner.
+func NewSpinner() spinner.Model {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(Red)
+	return sp
+}

@@ -58,10 +58,6 @@ func New(client youtube.Client) Model {
 	ti.CharLimit = 256
 	ti.Focus()
 
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(styles.Red)
-
 	delegate := videoDelegate{}
 	l := list.New(nil, delegate, 0, 0)
 	l.SetShowTitle(false)
@@ -74,7 +70,7 @@ func New(client youtube.Client) Model {
 	return Model{
 		input:   ti,
 		results: l,
-		spinner: sp,
+		spinner: styles.NewSpinner(),
 		keys:    defaultKeyMap(),
 		focused: focusInput,
 		client:  client,
