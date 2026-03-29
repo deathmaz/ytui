@@ -83,7 +83,22 @@ func findCookieFile() (string, error) {
 	return "", fmt.Errorf("Brave cookie file not found (tried %v)", braveCookiePaths)
 }
 
-// HTTPClient creates an http.Client with the given cookie jar attached.
+// HTTPClient creates an http.Client with the given cookie jar and SAPISIDHASH
+// auth transport for authenticated YouTube API requests.
 func HTTPClient(jar http.CookieJar) *http.Client {
-	return &http.Client{Jar: jar}
+	client := &http.Client{Jar: jar}
+
+	// Find SAPISID cookie for auth header
+	ytURL, _ := url.Parse("https://www.youtube.com")
+	for _, c := range jar.Cookies(ytURL) {
+		if c.Name == "SAPISID" {
+			client.Transport = &AuthTransport{
+				SAPISID: c.Value,
+				Jar:     jar,
+			}
+			break
+		}
+	}
+
+	return client
 }

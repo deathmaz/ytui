@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -31,9 +32,7 @@ type SearchResultMsg struct {
 }
 
 // VideoSelectedMsg is emitted when a user selects a video.
-type VideoSelectedMsg struct {
-	Video youtube.Video
-}
+type VideoSelectedMsg = shared.VideoSelectedMsg
 
 // Model is the search view model.
 type Model struct {
@@ -58,14 +57,7 @@ func New(client youtube.Client) Model {
 	ti.CharLimit = 256
 	ti.Focus()
 
-	delegate := videoDelegate{}
-	l := list.New(nil, delegate, 0, 0)
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetShowHelp(false)
-	l.SetFilteringEnabled(false)
-	l.SetShowPagination(true)
-	l.KeyMap.Quit = key.NewBinding() // disable list's built-in quit
+	l := shared.NewList(shared.VideoDelegate{})
 
 	return Model{
 		input:   ti,
@@ -127,7 +119,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Submit) && m.focused == focusList:
 			if item, ok := m.results.SelectedItem().(videoItem); ok {
 				return m, func() tea.Msg {
-					return VideoSelectedMsg{Video: item.video}
+					return VideoSelectedMsg{Video: item.Video}
 				}
 			}
 
@@ -148,14 +140,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			newItems := make([]list.Item, len(existing), len(existing)+len(msg.Videos))
 			copy(newItems, existing)
 			for _, v := range msg.Videos {
-				newItems = append(newItems, videoItem{video: v})
+				newItems = append(newItems, videoItem{Video: v})
 			}
 			cmd := m.results.SetItems(newItems)
 			cmds = append(cmds, cmd)
 		} else {
 			items := make([]list.Item, len(msg.Videos))
 			for i, v := range msg.Videos {
-				items[i] = videoItem{video: v}
+				items[i] = videoItem{Video: v}
 			}
 			cmd := m.results.SetItems(items)
 			cmds = append(cmds, cmd)
@@ -242,7 +234,7 @@ func (m Model) InputFocused() bool {
 // SelectedVideo returns the currently selected video, if any.
 func (m Model) SelectedVideo() (youtube.Video, bool) {
 	if item, ok := m.results.SelectedItem().(videoItem); ok {
-		return item.video, true
+		return item.Video, true
 	}
 	return youtube.Video{}, false
 }

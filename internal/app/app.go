@@ -12,8 +12,11 @@ import (
 	"github.com/deathmaz/ytui/internal/download"
 	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/ui/detail"
+	"github.com/deathmaz/ytui/internal/ui/feed"
 	"github.com/deathmaz/ytui/internal/ui/picker"
 	"github.com/deathmaz/ytui/internal/ui/search"
+	"github.com/deathmaz/ytui/internal/ui/shared"
+	"github.com/deathmaz/ytui/internal/ui/subs"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -55,6 +58,8 @@ type Model struct {
 	help       help.Model
 	search     search.Model
 	detail     detail.Model
+	feed       feed.Model
+	subs       subs.Model
 	ytClient   youtube.Client
 	picker     picker.Model
 	playerCmd   string
@@ -78,6 +83,8 @@ func New(client youtube.Client) *Model {
 		help:       h,
 		search:     search.New(client),
 		detail:     detail.New(client),
+		feed:       feed.New(client),
+		subs:       subs.New(client),
 		ytClient:   client,
 		picker:      picker.New(),
 		playerCmd:   "mpv",
@@ -98,8 +105,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.Width = msg.Width
-		m.search.SetSize(msg.Width, m.contentHeight())
-		m.detail.SetSize(msg.Width, m.contentHeight())
+		m.resizeViews()
 
 	case tea.KeyMsg:
 		// Quality picker takes priority when active
@@ -135,10 +141,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case key.Matches(msg, m.keys.Feed):
 				m.switchTo(ViewFeed)
-				return m, nil
+				return m, m.feed.Load(false)
 			case key.Matches(msg, m.keys.Subs):
 				m.switchTo(ViewSubs)
-				return m, nil
+				return m, m.subs.Load(false)
 			case key.Matches(msg, m.keys.Search):
 				m.switchTo(ViewSearch)
 				m.search.Focus()
@@ -155,10 +161,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case search.VideoSelectedMsg:
-		// Enter on a video opens detail view
+	case shared.VideoSelectedMsg:
 		m.switchTo(ViewDetail)
 		return m, m.detail.LoadVideo(msg.Video.ID)
+
+	case subs.ChannelSelectedMsg:
+		// TODO: show channel videos
+		return m, m.setStatus("Channel: "+msg.Channel.Name, 3*time.Second)
 
 	case picker.SelectedMsg:
 		if m.pendingVideoURL != "" {
@@ -189,8 +198,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ytClient = msg.client
 		m.search = search.New(msg.client)
 		m.detail = detail.New(msg.client)
-		m.search.SetSize(m.width, m.contentHeight())
-		m.detail.SetSize(m.width, m.contentHeight())
+		m.feed = feed.New(msg.client)
+		m.subs = subs.New(msg.client)
+		m.resizeViews()
 		return m, m.setStatus("Authenticated via "+m.browser, 3*time.Second)
 
 	case authResultMsg:
@@ -200,6 +210,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearStatusMsg:
 		if msg.seq == m.statusSeq {
 			m.statusMsg = ""
+			m.resizeViews()
 		}
 	}
 
@@ -212,6 +223,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewDetail:
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(msg)
+		cmds = append(cmds, cmd)
+	case ViewFeed:
+		var cmd tea.Cmd
+		m.feed, cmd = m.feed.Update(msg)
+		cmds = append(cmds, cmd)
+	case ViewSubs:
+		var cmd tea.Cmd
+		m.subs, cmd = m.subs.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 
@@ -258,6 +277,10 @@ func (m *Model) selectedVideo() *youtube.Video {
 	switch m.activeView {
 	case ViewSearch:
 		if v, ok := m.search.SelectedVideo(); ok {
+			return &v
+		}
+	case ViewFeed:
+		if v, ok := m.feed.SelectedVideo(); ok {
 			return &v
 		}
 	case ViewDetail:
@@ -341,11 +364,28 @@ func playVideoCmd(url, format, playerCmd string) tea.Cmd {
 }
 
 func (m *Model) contentHeight() int {
-	h := m.height - 4 // tabs + help
+	tabs := m.renderTabs()
+	helpView := statusBarStyle.Render(m.help.View(m.keys))
+	overhead := lipgloss.Height(tabs) + lipgloss.Height(helpView)
 	if m.statusMsg != "" || m.downloading {
-		h--
+		overhead++
+	}
+	h := m.height - overhead
+	if h < 1 {
+		h = 1
 	}
 	return h
+}
+
+func (m *Model) resizeViews() {
+	if m.width == 0 {
+		return
+	}
+	ch := m.contentHeight()
+	m.search.SetSize(m.width, ch)
+	m.detail.SetSize(m.width, ch)
+	m.feed.SetSize(m.width, ch)
+	m.subs.SetSize(m.width, ch)
 }
 
 func (m *Model) renderTabs() string {
@@ -378,9 +418,9 @@ func (m *Model) renderContent() string {
 	case ViewDetail:
 		return m.detail.View()
 	case ViewFeed:
-		return m.renderPlaceholder("Feed - aggregated subscription videos")
+		return m.feed.View()
 	case ViewSubs:
-		return m.renderPlaceholder("Subscriptions")
+		return m.subs.View()
 	case ViewComments:
 		return m.renderPlaceholder("Comments")
 	}
