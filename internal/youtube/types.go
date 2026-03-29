@@ -12,6 +12,7 @@ type Video struct {
 	LikeCount       string
 	PublishedAt     string
 	SubscriberCount string
+	CommentsToken   string
 	Thumbnails      []Thumbnail
 	URL             string
 }
@@ -38,6 +39,7 @@ type Comment struct {
 	PublishedAt string
 	IsPinned    bool
 	IsOwner     bool
+	ReplyToken  string
 }
 
 // Thumbnail holds image URL and dimensions.

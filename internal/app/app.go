@@ -11,6 +11,7 @@ import (
 	"github.com/deathmaz/ytui/internal/auth"
 	"github.com/deathmaz/ytui/internal/download"
 	"github.com/deathmaz/ytui/internal/player"
+	"github.com/deathmaz/ytui/internal/ui/comments"
 	"github.com/deathmaz/ytui/internal/ui/detail"
 	"github.com/deathmaz/ytui/internal/ui/feed"
 	"github.com/deathmaz/ytui/internal/ui/picker"
@@ -60,6 +61,7 @@ type Model struct {
 	detail     detail.Model
 	feed       feed.Model
 	subs       subs.Model
+	comments   comments.Model
 	ytClient   youtube.Client
 	picker     picker.Model
 	playerCmd   string
@@ -85,6 +87,7 @@ func New(client youtube.Client) *Model {
 		detail:     detail.New(client),
 		feed:       feed.New(client),
 		subs:       subs.New(client),
+		comments:   comments.New(client),
 		ytClient:   client,
 		picker:      picker.New(),
 		playerCmd:   "mpv",
@@ -154,6 +157,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keys.Play):
 				m.openQualityPicker()
 				return m, nil
+			case key.Matches(msg, m.keys.Comments):
+				return m, m.openComments()
 			case key.Matches(msg, m.keys.Download):
 				return m, m.startDownload()
 			case key.Matches(msg, m.keys.Auth):
@@ -200,6 +205,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail = detail.New(msg.client)
 		m.feed = feed.New(msg.client)
 		m.subs = subs.New(msg.client)
+		m.comments = comments.New(msg.client)
 		m.resizeViews()
 		return m, m.setStatus("Authenticated via "+m.browser, 3*time.Second)
 
@@ -231,6 +237,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewSubs:
 		var cmd tea.Cmd
 		m.subs, cmd = m.subs.Update(msg)
+		cmds = append(cmds, cmd)
+	case ViewComments:
+		var cmd tea.Cmd
+		m.comments, cmd = m.comments.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 
@@ -287,6 +297,15 @@ func (m *Model) selectedVideo() *youtube.Video {
 		return m.detail.Video()
 	}
 	return nil
+}
+
+func (m *Model) openComments() tea.Cmd {
+	v := m.selectedVideo()
+	if v == nil {
+		return nil
+	}
+	m.switchTo(ViewComments)
+	return m.comments.LoadComments(v.CommentsToken)
 }
 
 func (m *Model) openDetail() tea.Cmd {
@@ -386,6 +405,7 @@ func (m *Model) resizeViews() {
 	m.detail.SetSize(m.width, ch)
 	m.feed.SetSize(m.width, ch)
 	m.subs.SetSize(m.width, ch)
+	m.comments.SetSize(m.width, ch)
 }
 
 func (m *Model) renderTabs() string {
@@ -422,7 +442,7 @@ func (m *Model) renderContent() string {
 	case ViewSubs:
 		return m.subs.View()
 	case ViewComments:
-		return m.renderPlaceholder("Comments")
+		return m.comments.View()
 	}
 	return ""
 }

@@ -110,6 +110,7 @@ func (c *InnerTubeClient) GetVideo(ctx context.Context, id string) (*Video, erro
 	nr := <-nextCh
 	if nr.err == nil {
 		enrichVideo(v, nr.raw)
+		v.CommentsToken = extractCommentsToken(nr.raw)
 	}
 
 	return v, nil
@@ -153,11 +154,142 @@ func enrichVideo(v *Video, raw map[string]interface{}) {
 }
 
 func (c *InnerTubeClient) GetComments(ctx context.Context, videoID string, pageToken string) (*Page[Comment], error) {
-	return nil, fmt.Errorf("not implemented")
+	if pageToken == "" {
+		return &Page[Comment]{}, nil
+	}
+	raw, err := c.it.Next(ctx, nil, nil, nil, nil, &pageToken)
+	if err != nil {
+		return nil, fmt.Errorf("innertube comments: %w", err)
+	}
+	return parseCommentsResponse(raw)
 }
 
 func (c *InnerTubeClient) GetReplies(ctx context.Context, commentID string, pageToken string) (*Page[Comment], error) {
-	return nil, fmt.Errorf("not implemented")
+	if pageToken == "" {
+		return &Page[Comment]{}, nil
+	}
+	raw, err := c.it.Next(ctx, nil, nil, nil, nil, &pageToken)
+	if err != nil {
+		return nil, fmt.Errorf("innertube replies: %w", err)
+	}
+	return parseCommentsResponse(raw)
+}
+
+func extractCommentsToken(raw map[string]interface{}) string {
+	data, err := toGJSON(raw)
+	if err != nil {
+		return ""
+	}
+	var token string
+	data.Get("engagementPanels").ForEach(func(_, panel gjson.Result) bool {
+		ep := panel.Get("engagementPanelSectionListRenderer")
+		if ep.Get("panelIdentifier").String() == "engagement-panel-comments-section" {
+			t := ep.Get("content.sectionListRenderer.contents.0.itemSectionRenderer.contents.0.continuationItemRenderer.continuationEndpoint.continuationCommand.token")
+			if t.Exists() {
+				token = t.String()
+			}
+		}
+		return true
+	})
+	return token
+}
+
+func parseCommentsResponse(raw map[string]interface{}) (*Page[Comment], error) {
+	data, err := toGJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build lookup map from entity mutations
+	commentEntities := map[string]gjson.Result{}
+	data.Get("frameworkUpdates.entityBatchUpdate.mutations").ForEach(func(_, m gjson.Result) bool {
+		ce := m.Get("payload.commentEntityPayload")
+		if ce.Exists() {
+			key := ce.Get("key").String()
+			if key != "" {
+				commentEntities[key] = ce
+			}
+		}
+		return true
+	})
+
+	var comments []Comment
+	var nextToken string
+
+	// Extract comment thread keys and reply tokens from onResponseReceivedEndpoints
+	data.Get("onResponseReceivedEndpoints").ForEach(func(_, ep gjson.Result) bool {
+		items := ep.Get("reloadContinuationItemsCommand.continuationItems")
+		if !items.Exists() {
+			items = ep.Get("appendContinuationItemsAction.continuationItems")
+		}
+		if !items.Exists() {
+			return true
+		}
+		items.ForEach(func(_, item gjson.Result) bool {
+			// Top-level comment thread (has replies container)
+			ctr := item.Get("commentThreadRenderer")
+			if ctr.Exists() {
+				commentKey := ctr.Get("commentViewModel.commentViewModel.commentKey").String()
+				if ce, ok := commentEntities[commentKey]; ok {
+					c := parseCommentEntity(ce)
+					replyCi := ctr.Get("replies.commentRepliesRenderer.contents.0.continuationItemRenderer")
+					if rt := extractContinuationToken(replyCi); rt != "" {
+						c.ReplyToken = rt
+					}
+					comments = append(comments, c)
+				}
+				return true
+			}
+			// Reply or standalone comment (commentViewModel directly)
+			cvm := item.Get("commentViewModel")
+			if cvm.Exists() {
+				commentKey := cvm.Get("commentKey").String()
+				if ce, ok := commentEntities[commentKey]; ok {
+					comments = append(comments, parseCommentEntity(ce))
+				}
+				return true
+			}
+			ci := item.Get("continuationItemRenderer")
+			if ci.Exists() {
+				if t := extractContinuationToken(ci); t != "" {
+					nextToken = t
+				}
+			}
+			return true
+		})
+		return true
+	})
+
+	return &Page[Comment]{
+		Items:     comments,
+		NextToken: nextToken,
+		HasMore:   nextToken != "",
+	}, nil
+}
+
+func extractContinuationToken(ci gjson.Result) string {
+	token := ci.Get("continuationEndpoint.continuationCommand.token")
+	if !token.Exists() {
+		token = ci.Get("button.buttonRenderer.command.continuationCommand.token")
+	}
+	return token.String()
+}
+
+func parseCommentEntity(ce gjson.Result) Comment {
+	props := ce.Get("properties")
+	author := ce.Get("author")
+	toolbar := ce.Get("toolbar")
+
+	return Comment{
+		ID:          props.Get("commentId").String(),
+		AuthorName:  author.Get("displayName").String(),
+		AuthorID:    author.Get("channelId").String(),
+		Content:     props.Get("content.content").String(),
+		LikeCount:   toolbar.Get("likeCountNotliked").String(),
+		ReplyCount:  toolbar.Get("replyCount").Int(),
+		PublishedAt: props.Get("publishedTime").String(),
+		IsOwner:     author.Get("isCreator").Bool(),
+	}
 }
 
 func (c *InnerTubeClient) GetSubscriptions(ctx context.Context, pageToken string) (*Page[Channel], error) {
