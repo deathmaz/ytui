@@ -4,17 +4,23 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
 
-var separatorStyle = lipgloss.NewStyle().Foreground(styles.DarkGray)
+var separatorStyle = styles.Dim
+
+const (
+	thumbCols = 40
+	thumbRows = 10
+)
 
 // VideoLoadedMsg carries the loaded video details.
 type VideoLoadedMsg struct {
@@ -22,22 +28,28 @@ type VideoLoadedMsg struct {
 	Err   error
 }
 
+type clearTransmitMsg struct{}
+
 // Model is the video detail view.
 type Model struct {
-	viewport viewport.Model
-	spinner  spinner.Model
-	video    *youtube.Video
-	loading  bool
-	width    int
-	height   int
-	client   youtube.Client
+	viewport       viewport.Model
+	spinner        spinner.Model
+	video          *youtube.Video
+	loading        bool
+	width          int
+	height         int
+	client         youtube.Client
+	imgR           *ytimage.Renderer
+	thumbTransmit  string // transmit sequence, prepended to View() output
+	thumbPlace     string // placeholder grid, embedded in viewport content
 }
 
 // New creates a new detail view model.
-func New(client youtube.Client) Model {
+func New(client youtube.Client, imgR *ytimage.Renderer) Model {
 	return Model{
 		spinner: styles.NewSpinner(),
 		client:  client,
+		imgR:    imgR,
 	}
 }
 
@@ -56,6 +68,8 @@ func (m *Model) SetSize(w, h int) {
 func (m *Model) LoadVideo(id string) tea.Cmd {
 	m.loading = true
 	m.video = nil
+	m.thumbTransmit = ""
+	m.thumbPlace = ""
 	client := m.client
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
 		v, err := client.GetVideo(context.Background(), id)
@@ -75,6 +89,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case VideoLoadedMsg:
 		m.loading = false
 		if msg.Err != nil {
+			m.viewport = viewport.New(m.width, m.height)
+			m.viewport.KeyMap = viewportKeyMap()
 			m.viewport.SetContent(fmt.Sprintf("Error loading video: %v", msg.Err))
 			return m, nil
 		}
@@ -82,6 +98,37 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.viewport = viewport.New(m.width, m.height)
 		m.viewport.KeyMap = viewportKeyMap()
 		m.viewport.SetContent(m.renderDetail())
+
+		// Fetch thumbnail async
+		if m.imgR != nil {
+			thumbURL := bestThumbnail(m.video)
+			tx, pl := m.imgR.Get(thumbURL)
+			if pl != "" {
+				m.thumbTransmit = tx
+				m.thumbPlace = pl
+				m.viewport.SetContent(m.renderDetail())
+				cmds = append(cmds, scheduleClearTransmit())
+			} else {
+				cmds = append(cmds, m.imgR.FetchCmd(thumbURL, thumbCols, thumbRows))
+			}
+		}
+		return m, tea.Batch(cmds...)
+
+	case ytimage.ThumbnailLoadedMsg:
+		if msg.Err == nil && msg.Placeholder != "" {
+			m.imgR.Store(msg.URL, msg.TransmitStr, msg.Placeholder)
+			m.thumbTransmit = msg.TransmitStr
+			m.thumbPlace = msg.Placeholder
+			if m.video != nil {
+				m.viewport.SetContent(m.renderDetail())
+			}
+			// Schedule clearing the transmit after Kitty has processed it
+			cmds = append(cmds, scheduleClearTransmit())
+		}
+		return m, tea.Batch(cmds...)
+
+	case clearTransmitMsg:
+		m.thumbTransmit = ""
 		return m, nil
 
 	case tea.KeyMsg:
@@ -102,13 +149,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func scheduleClearTransmit() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+		return clearTransmitMsg{}
+	})
+}
+
 func (m Model) View() string {
 	if m.loading {
 		return m.spinner.View() + " Loading video details..."
 	}
+	// Prepend transmit sequence OUTSIDE the viewport so it doesn't
+	// get mangled by viewport's line processing
+	if m.thumbTransmit != "" {
+		return m.thumbTransmit + m.viewport.View()
+	}
 	return m.viewport.View()
 }
 
+// renderDetail renders the viewport content (placeholders + text, no transmit).
 func (m Model) renderDetail() string {
 	v := m.video
 	if v == nil {
@@ -116,8 +175,12 @@ func (m Model) renderDetail() string {
 	}
 
 	var b strings.Builder
-
 	sep := separatorStyle.Render(strings.Repeat("─", m.width-2))
+
+	if m.thumbPlace != "" {
+		b.WriteString(m.thumbPlace)
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString(styles.Title.MarginBottom(1).Width(m.width - 2).Render(v.Title))
 	b.WriteString("\n")
@@ -158,18 +221,35 @@ func (m Model) renderDetail() string {
 	b.WriteString("\n")
 	b.WriteString(sep)
 	b.WriteString("\n")
-	b.WriteString(styles.Dim.Render("[p] play  [d] download  [o] open in browser  [y] copy URL  [esc] back"))
+	b.WriteString(styles.Dim.Render("[p] play  [d] download  [c] comments  [o] open in browser  [y] copy URL  [esc] back"))
 
 	return b.String()
 }
 
+func bestThumbnail(v *youtube.Video) string {
+	if len(v.Thumbnails) > 0 {
+		best := v.Thumbnails[0]
+		for _, t := range v.Thumbnails[1:] {
+			if t.Width > best.Width {
+				best = t
+			}
+		}
+		return best.URL
+	}
+	// Fallback: YouTube always has auto-generated thumbnails at this URL
+	if v.ID != "" {
+		return "https://i.ytimg.com/vi/" + v.ID + "/hqdefault.jpg"
+	}
+	return ""
+}
+
 func viewportKeyMap() viewport.KeyMap {
 	return viewport.KeyMap{
-		PageDown: key.NewBinding(key.WithKeys("ctrl+f", "pgdown")),
-		PageUp:   key.NewBinding(key.WithKeys("ctrl+b", "pgup")),
+		PageDown:     key.NewBinding(key.WithKeys("ctrl+f", "pgdown")),
+		PageUp:       key.NewBinding(key.WithKeys("ctrl+b", "pgup")),
 		HalfPageDown: key.NewBinding(key.WithKeys("ctrl+d")),
 		HalfPageUp:   key.NewBinding(key.WithKeys("ctrl+u")),
-		Up:   key.NewBinding(key.WithKeys("k", "up")),
-		Down: key.NewBinding(key.WithKeys("j", "down")),
+		Up:           key.NewBinding(key.WithKeys("k", "up")),
+		Down:         key.NewBinding(key.WithKeys("j", "down")),
 	}
 }

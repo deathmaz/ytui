@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/nezbut/innertube-go v0.0.0-20260119022447-b258db416246
 	github.com/tidwall/gjson v1.18.0
+	golang.org/x/image v0.38.0
 )
 
 require (
@@ -42,5 +43,5 @@ require (
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
 )

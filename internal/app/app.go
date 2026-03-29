@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/auth"
 	"github.com/deathmaz/ytui/internal/download"
+	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/ui/comments"
 	"github.com/deathmaz/ytui/internal/ui/detail"
@@ -63,6 +64,7 @@ type Model struct {
 	subs       subs.Model
 	comments   comments.Model
 	ytClient   youtube.Client
+	imgR       *ytimage.Renderer
 	picker     picker.Model
 	playerCmd   string
 	downloadCmd string
@@ -79,15 +81,17 @@ type Model struct {
 func New(client youtube.Client) *Model {
 	h := help.New()
 	h.ShortSeparator = "  "
+	imgR := ytimage.NewRenderer()
 	return &Model{
 		activeView: ViewSearch,
 		keys:       DefaultKeyMap(),
 		help:       h,
 		search:     search.New(client),
-		detail:     detail.New(client),
+		detail:     detail.New(client, imgR),
 		feed:       feed.New(client),
 		subs:       subs.New(client),
 		comments:   comments.New(client),
+		imgR:       imgR,
 		ytClient:   client,
 		picker:      picker.New(),
 		playerCmd:   "mpv",
@@ -202,7 +206,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.authenticating = false
 		m.ytClient = msg.client
 		m.search = search.New(msg.client)
-		m.detail = detail.New(msg.client)
+		m.detail = detail.New(msg.client, m.imgR)
 		m.feed = feed.New(msg.client)
 		m.subs = subs.New(msg.client)
 		m.comments = comments.New(msg.client)
