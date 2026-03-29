@@ -1,0 +1,81 @@
+{
+  "onResponseReceivedEndpoints": [
+    {
+      "appendContinuationItemsAction": {
+        "continuationItems": [
+          {
+            "commentViewModel": {
+              "commentKey": "reply_key_1"
+            }
+          },
+          {
+            "commentViewModel": {
+              "commentKey": "reply_key_2"
+            }
+          },
+          {
+            "continuationItemRenderer": {
+              "button": {
+                "buttonRenderer": {
+                  "command": {
+                    "continuationCommand": {
+                      "token": "fake_more_replies_token"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "frameworkUpdates": {
+    "entityBatchUpdate": {
+      "mutations": [
+        {
+          "payload": {
+            "commentEntityPayload": {
+              "key": "reply_key_1",
+              "properties": {
+                "commentId": "fake_reply_id_1",
+                "content": {"content": "This is a reply"},
+                "publishedTime": "1 hour ago"
+              },
+              "author": {
+                "displayName": "ReplyUser1",
+                "channelId": "UCfake_replier1",
+                "isCreator": false
+              },
+              "toolbar": {
+                "likeCountNotliked": "5",
+                "replyCount": 0
+              }
+            }
+          }
+        },
+        {
+          "payload": {
+            "commentEntityPayload": {
+              "key": "reply_key_2",
+              "properties": {
+                "commentId": "fake_reply_id_2",
+                "content": {"content": "Another reply here"},
+                "publishedTime": "30 minutes ago"
+              },
+              "author": {
+                "displayName": "ReplyUser2",
+                "channelId": "UCfake_replier2",
+                "isCreator": true
+              },
+              "toolbar": {
+                "likeCountNotliked": "",
+                "replyCount": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

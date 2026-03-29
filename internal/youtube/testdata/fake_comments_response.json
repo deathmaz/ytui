@@ -1,0 +1,109 @@
+{
+  "onResponseReceivedEndpoints": [
+    {
+      "reloadContinuationItemsCommand": {
+        "continuationItems": [
+          {
+            "commentsHeaderRenderer": {}
+          }
+        ]
+      }
+    },
+    {
+      "reloadContinuationItemsCommand": {
+        "continuationItems": [
+          {
+            "commentThreadRenderer": {
+              "commentViewModel": {
+                "commentViewModel": {
+                  "commentKey": "comment_key_1"
+                }
+              },
+              "replies": {
+                "commentRepliesRenderer": {
+                  "contents": [
+                    {
+                      "continuationItemRenderer": {
+                        "continuationEndpoint": {
+                          "continuationCommand": {
+                            "token": "fake_reply_token_1"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "commentThreadRenderer": {
+              "commentViewModel": {
+                "commentViewModel": {
+                  "commentKey": "comment_key_2"
+                }
+              }
+            }
+          },
+          {
+            "continuationItemRenderer": {
+              "continuationEndpoint": {
+                "continuationCommand": {
+                  "token": "fake_comments_next_page"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "frameworkUpdates": {
+    "entityBatchUpdate": {
+      "mutations": [
+        {
+          "payload": {
+            "commentEntityPayload": {
+              "key": "comment_key_1",
+              "properties": {
+                "commentId": "fake_comment_id_1",
+                "content": {"content": "This is a fake comment with some text"},
+                "publishedTime": "2 hours ago"
+              },
+              "author": {
+                "displayName": "FakeUser1",
+                "channelId": "UCfake_user1",
+                "isCreator": false
+              },
+              "toolbar": {
+                "likeCountNotliked": "42",
+                "replyCount": 5
+              }
+            }
+          }
+        },
+        {
+          "payload": {
+            "commentEntityPayload": {
+              "key": "comment_key_2",
+              "properties": {
+                "commentId": "fake_comment_id_2",
+                "content": {"content": "Another fake comment by the creator"},
+                "publishedTime": "1 day ago"
+              },
+              "author": {
+                "displayName": "ChannelOwner",
+                "channelId": "UCfake_owner",
+                "isCreator": true
+              },
+              "toolbar": {
+                "likeCountNotliked": "100",
+                "replyCount": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

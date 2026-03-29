@@ -1,0 +1,139 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "selected": true,
+            "content": {
+              "richGridRenderer": {
+                "contents": [
+                  {
+                    "richItemRenderer": {
+                      "content": {
+                        "lockupViewModel": {
+                          "contentId": "fake_vid_001",
+                          "metadata": {
+                            "lockupMetadataViewModel": {
+                              "title": {"content": "Fake Video Title One"},
+                              "metadata": {
+                                "contentMetadataViewModel": {
+                                  "metadataRows": [
+                                    {
+                                      "metadataParts": [
+                                        {
+                                          "text": {
+                                            "content": "Fake Channel",
+                                            "commandRuns": [
+                                              {
+                                                "onTap": {
+                                                  "innertubeCommand": {
+                                                    "browseEndpoint": {
+                                                      "browseId": "UCfake123"
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "metadataParts": [
+                                        {"text": {"content": "10K views"}},
+                                        {"text": {"content": "2 hours ago"}}
+                                      ]
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          },
+                          "contentImage": {
+                            "thumbnailViewModel": {
+                              "overlays": [
+                                {
+                                  "thumbnailBottomOverlayViewModel": {
+                                    "badges": [
+                                      {
+                                        "thumbnailBadgeViewModel": {
+                                          "text": "12:34"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "richItemRenderer": {
+                      "content": {
+                        "lockupViewModel": {
+                          "contentId": "fake_vid_002",
+                          "metadata": {
+                            "lockupMetadataViewModel": {
+                              "title": {"content": "Another Fake Video"},
+                              "metadata": {
+                                "contentMetadataViewModel": {
+                                  "metadataRows": [
+                                    {
+                                      "metadataParts": [
+                                        {"text": {"content": "Another Channel"}}
+                                      ]
+                                    },
+                                    {
+                                      "metadataParts": [
+                                        {"text": {"content": "500 views"}},
+                                        {"text": {"content": "1 day ago"}}
+                                      ]
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          },
+                          "contentImage": {
+                            "thumbnailViewModel": {
+                              "overlays": [
+                                {
+                                  "thumbnailBottomOverlayViewModel": {
+                                    "badges": [
+                                      {
+                                        "thumbnailBadgeViewModel": {
+                                          "text": "5:00"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "continuationItemRenderer": {
+                      "continuationEndpoint": {
+                        "continuationCommand": {
+                          "token": "fake_continuation_token_feed"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "selected": true,
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "shelfRenderer": {
+                            "content": {
+                              "expandedShelfContentsRenderer": {
+                                "items": [
+                                  {
+                                    "channelRenderer": {
+                                      "channelId": "UCfake_ch1",
+                                      "title": {"simpleText": "Fake Channel One"},
+                                      "subscriberCountText": {"simpleText": "@fakechannel1"},
+                                      "videoCountText": {"simpleText": "100K subscribers"},
+                                      "thumbnail": {
+                                        "thumbnails": [
+                                          {"url": "https://example.com/thumb1.jpg", "width": 88, "height": 88}
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "channelRenderer": {
+                                      "channelId": "UCfake_ch2",
+                                      "title": {"simpleText": "Topic Channel - Topic"},
+                                      "subscriberCountText": {"simpleText": "50K subscribers"},
+                                      "thumbnail": {
+                                        "thumbnails": [
+                                          {"url": "https://example.com/thumb2.jpg", "width": 88, "height": 88}
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "channelRenderer": {
+                                      "channelId": "UCfake_ch3",
+                                      "title": {"simpleText": "Third Channel"},
+                                      "subscriberCountText": {"simpleText": "@thirdchannel"},
+                                      "videoCountText": {"simpleText": "1.2M subscribers"}
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "continuationItemRenderer": {
+                      "continuationEndpoint": {
+                        "continuationCommand": {
+                          "token": "fake_channels_continuation"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

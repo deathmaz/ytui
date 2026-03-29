@@ -1,0 +1,85 @@
+{
+  "contents": {
+    "twoColumnWatchNextResults": {
+      "results": {
+        "results": {
+          "contents": [
+            {
+              "videoPrimaryInfoRenderer": {
+                "viewCount": {
+                  "videoViewCountRenderer": {
+                    "viewCount": {"simpleText": "1,234,567 views"}
+                  }
+                },
+                "dateText": {"simpleText": "Jan 1, 2025"},
+                "videoActions": {
+                  "menuRenderer": {
+                    "topLevelButtons": [
+                      {
+                        "segmentedLikeDislikeButtonViewModel": {
+                          "likeButtonViewModel": {
+                            "likeButtonViewModel": {
+                              "toggleButtonViewModel": {
+                                "toggleButtonViewModel": {
+                                  "defaultButtonViewModel": {
+                                    "buttonViewModel": {
+                                      "title": "10K"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "videoSecondaryInfoRenderer": {
+                "owner": {
+                  "videoOwnerRenderer": {
+                    "subscriberCountText": {"simpleText": "500K subscribers"}
+                  }
+                },
+                "attributedDescription": {
+                  "content": "This is a fake video description for testing purposes."
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "engagementPanels": [
+    {
+      "engagementPanelSectionListRenderer": {
+        "panelIdentifier": "engagement-panel-comments-section",
+        "content": {
+          "sectionListRenderer": {
+            "contents": [
+              {
+                "itemSectionRenderer": {
+                  "contents": [
+                    {
+                      "continuationItemRenderer": {
+                        "continuationEndpoint": {
+                          "continuationCommand": {
+                            "token": "fake_comments_token_abc123"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
