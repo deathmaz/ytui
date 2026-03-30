@@ -262,7 +262,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.feed = feed.New(msg.client)
 		m.subs = subs.New(msg.client)
 		m.resizeViews()
-		return m, m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second)
+		// Auto-reload the current view if it requires auth
+		var reloadCmd tea.Cmd
+		switch m.activeView {
+		case ViewFeed:
+			reloadCmd = m.feed.Load(true)
+		case ViewSubs:
+			reloadCmd = m.subs.Load(true)
+		}
+		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), reloadCmd)
 
 	case authResultMsg:
 		m.authenticating = false
