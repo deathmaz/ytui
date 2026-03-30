@@ -23,8 +23,8 @@ func (v VideoItem) Description() string { return v.Video.ChannelName }
 // VideoDelegate renders video items in a list.
 type VideoDelegate struct{}
 
-func (d VideoDelegate) Height() int                             { return 3 }
-func (d VideoDelegate) Spacing() int                            { return 0 }
+func (d VideoDelegate) Height() int                             { return 2 }
+func (d VideoDelegate) Spacing() int                            { return 1 }
 func (d VideoDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
 func (d VideoDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
@@ -60,7 +60,7 @@ func (d VideoDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		dur = styles.Accent.Render("  " + v.DurationStr)
 	}
 
-	fmt.Fprintf(w, "%s%s%s\n%s  %s\n", cursor, title, dur, "  ", meta)
+	fmt.Fprintf(w, "%s%s%s\n%s  %s", cursor, title, dur, "  ", meta)
 }
 
 // Truncate truncates a string to max runes, appending "..." if needed.

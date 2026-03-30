@@ -73,7 +73,8 @@ func New(client youtube.Client) Model {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	inputHeight := 3 // input + padding
+	inputView := inputStyle.Width(w).Render(m.input.View())
+	inputHeight := lipgloss.Height(inputView)
 	m.results.SetSize(w, h-inputHeight)
 	m.input.Width = w - 4
 }
@@ -114,6 +115,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.searching = true
 			m.focused = focusList
 			m.input.Blur()
+			m.results.SetItems(nil)
+			m.results.ResetSelected()
 			return m, tea.Batch(m.spinner.Tick, m.searchCmd(query, "", false))
 
 		case key.Matches(msg, m.keys.Submit) && m.focused == focusList:
@@ -192,14 +195,9 @@ func (m Model) View() string {
 		)
 	}
 
-	resultsView := m.results.View()
-	if m.loadingMore {
-		resultsView += "\n " + m.spinner.View() + " Loading more..."
-	}
-
 	return lipgloss.JoinVertical(lipgloss.Left,
 		inputView,
-		resultsView,
+		m.results.View(),
 	)
 }
 

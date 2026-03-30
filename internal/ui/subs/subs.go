@@ -40,7 +40,7 @@ func (c channelItem) Description() string { return c.channel.Handle }
 type channelDelegate struct{}
 
 func (d channelDelegate) Height() int                             { return 2 }
-func (d channelDelegate) Spacing() int                            { return 0 }
+func (d channelDelegate) Spacing() int                            { return 1 }
 func (d channelDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
 func (d channelDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
