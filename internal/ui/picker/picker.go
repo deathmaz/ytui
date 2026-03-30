@@ -36,7 +36,7 @@ type formatItem struct {
 
 func (f formatItem) FilterValue() string { return f.format.Display }
 func (f formatItem) Title() string       { return f.format.Display }
-func (f formatItem) Description() string { return f.format.Resolution }
+func (f formatItem) Description() string { return "" }
 
 // New creates a new quality picker.
 func New() Model {

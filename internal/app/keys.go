@@ -12,6 +12,7 @@ type KeyMap struct {
 	Search     key.Binding
 	Back       key.Binding
 	Play       key.Binding
+	PlayPick   key.Binding
 	Download   key.Binding
 	Comments   key.Binding
 	Detail     key.Binding
@@ -40,6 +41,7 @@ func DefaultKeyMap() KeyMap {
 		Search:     key.NewBinding(key.WithKeys("3", "/"), key.WithHelp("/", "search")),
 		Back:       key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		Play:       key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "play")),
+		PlayPick:   key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "play (pick quality)")),
 		Download:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "download")),
 		Comments:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comments")),
 		Detail:     key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "details")),
@@ -68,7 +70,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.PageUp, k.PageDown, k.HalfPageUp, k.HalfPageDn},
 		{k.Feed, k.Subs, k.Search, k.Back},
-		{k.Play, k.Download, k.Detail, k.Comments},
+		{k.Play, k.PlayPick, k.Download, k.Detail, k.Comments},
 		{k.Open, k.Yank, k.Refresh, k.Auth, k.Quit},
 	}
 }

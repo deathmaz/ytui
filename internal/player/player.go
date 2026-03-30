@@ -7,13 +7,21 @@ import (
 )
 
 // Play launches the player as a detached background process.
-// extraArgs are additional arguments from the config file.
-func Play(url, ytdlFormat, playerCmd string, extraArgs []string) error {
+// quality is a height like "1080", "720", "best", or "audio".
+func Play(url, quality, playerCmd string, extraArgs []string) error {
 	var args []string
 	args = append(args, extraArgs...)
-	if ytdlFormat != "" {
-		args = append(args, "--ytdl-format="+ytdlFormat)
+
+	switch quality {
+	case "", "best":
+		// Let mpv/yt-dlp pick the best
+	case "audio":
+		args = append(args, "--ytdl-format=bestaudio/best")
+	default:
+		// Use format-sort to prefer the selected resolution
+		args = append(args, "--ytdl-raw-options=format-sort=res:"+quality)
 	}
+
 	args = append(args, url)
 
 	cmd := exec.Command(playerCmd, args...)
@@ -23,8 +31,6 @@ func Play(url, ytdlFormat, playerCmd string, extraArgs []string) error {
 		return fmt.Errorf("start %s: %w", playerCmd, err)
 	}
 
-	// Let the process run independently
 	go cmd.Wait()
-
 	return nil
 }

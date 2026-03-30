@@ -53,7 +53,8 @@ ytui -search "go tutorial"  # search immediately on startup
 | `Esc` | Go back / blur input |
 | `Enter` | Select / search |
 | `i` | Video details |
-| `p` | Play video (opens quality picker) |
+| `p` | Play video (default/config quality) |
+| `P` | Play video (pick quality from list) |
 | `d` | Download video |
 | `c` | View comments |
 | `l` / `h` | Expand / collapse replies |
@@ -76,6 +77,7 @@ All settings are optional -- defaults are used for any missing values.
 [player]
 command = "mpv"                    # player command (default: "mpv")
 args = ["--no-terminal"]           # extra arguments passed to the player
+quality = ""                       # default quality: "1080", "720", "480", "best", "audio" (empty = system default)
 
 [download]
 command = "yt-dlp"                 # download command (default: "yt-dlp")

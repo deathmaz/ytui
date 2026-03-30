@@ -47,6 +47,11 @@ var (
 )
 
 type playerErrorMsg struct{ err error }
+type formatsLoadedMsg struct {
+	url     string
+	formats []player.Format
+	err     error
+}
 type downloadResultMsg struct{ result download.Result }
 type clearStatusMsg struct{ seq int }
 type authResultMsg struct{ err error }
@@ -61,6 +66,7 @@ type videoTab struct {
 	detail          detail.Model
 	comments        comments.Model
 	showingComments bool
+	formats         []player.Format // cached quality list from yt-dlp
 }
 
 // Model is the root Bubble Tea model.
@@ -198,8 +204,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keys.Detail):
 				return m, m.openDetail()
 			case key.Matches(msg, m.keys.Play):
-				m.openQualityPicker()
-				return m, nil
+				return m, m.quickPlay()
+			case key.Matches(msg, m.keys.PlayPick):
+				return m, m.fetchFormatsAndPlay()
 			case key.Matches(msg, m.keys.Comments):
 				return m, m.openComments()
 			case key.Matches(msg, m.keys.Download):
@@ -232,12 +239,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// TODO: show channel videos
 		return m, m.setStatus("Channel: "+msg.Channel.Name, 3*time.Second)
 
+	case formatsLoadedMsg:
+		var formats []player.Format
+		if msg.err != nil {
+			formats = player.DefaultFormats()
+		} else {
+			formats = msg.formats
+		}
+		// Cache on active video tab
+		if tab := m.activeTab(); tab != nil {
+			tab.formats = formats
+		}
+		m.picker.Show(formats, m.width, m.height)
+		m.pendingVideoURL = msg.url
+		return m, nil
+
 	case picker.SelectedMsg:
 		if m.pendingVideoURL != "" {
 			url := m.pendingVideoURL
-			format := msg.Format.ID
+			quality := msg.Format.ID
 			m.pendingVideoURL = ""
-			return m, playVideoCmd(url, format, m.cfg.Player.Command, m.cfg.Player.Args)
+			return m, playVideoCmd(url, quality, m.cfg.Player.Command, m.cfg.Player.Args)
 		}
 		return m, nil
 
@@ -470,13 +492,34 @@ func (m *Model) openDetail() tea.Cmd {
 	return m.openVideoTab(v)
 }
 
-func (m *Model) openQualityPicker() {
+func (m *Model) quickPlay() tea.Cmd {
 	v := m.selectedVideo()
 	if v == nil {
-		return
+		return nil
 	}
-	m.pendingVideoURL = v.URL
-	m.picker.Show(player.CommonFormats(), m.width, m.height)
+	return playVideoCmd(v.URL, m.cfg.Player.Quality, m.cfg.Player.Command, m.cfg.Player.Args)
+}
+
+func (m *Model) fetchFormatsAndPlay() tea.Cmd {
+	v := m.selectedVideo()
+	if v == nil {
+		return nil
+	}
+	// Use cached formats from the active video tab if available
+	if tab := m.activeTab(); tab != nil && len(tab.formats) > 0 {
+		m.picker.Show(tab.formats, m.width, m.height)
+		m.pendingVideoURL = v.URL
+		return nil
+	}
+	url := v.URL
+	dlCmd := m.cfg.Download.Command
+	return tea.Batch(
+		m.setStatus("Fetching available qualities...", 10*time.Second),
+		func() tea.Msg {
+			formats, err := player.FetchFormats(context.Background(), url, dlCmd)
+			return formatsLoadedMsg{url: url, formats: formats, err: err}
+		},
+	)
 }
 
 func (m *Model) startDownload() tea.Cmd {

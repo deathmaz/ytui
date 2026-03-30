@@ -5,38 +5,52 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 )
 
-// Format represents a video/audio format from yt-dlp.
+// Format represents a quality option for video playback.
 type Format struct {
-	ID         string
-	Extension  string
-	Resolution string
-	Note       string
-	Display    string // human-readable line
+	ID      string // used internally for mpv format-sort
+	Display string // shown to user in picker
 }
 
-// FetchFormats runs yt-dlp -F to list available formats for a URL.
-func FetchFormats(ctx context.Context, url string) ([]Format, error) {
-	cmd := exec.CommandContext(ctx, "yt-dlp", "-F", "--no-warnings", url)
+// FetchFormats runs yt-dlp -F to discover available resolutions for a URL.
+// Returns deduplicated quality options sorted from highest to lowest.
+func FetchFormats(ctx context.Context, url, command string) ([]Format, error) {
+	cmd := exec.CommandContext(ctx, command, "-F", "--no-warnings", url)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("yt-dlp -F: %w", err)
+		return nil, fmt.Errorf("%s -F: %w", command, err)
 	}
 
-	return parseFormats(string(out)), nil
+	resolutions := parseResolutions(string(out))
+	if len(resolutions) == 0 {
+		return DefaultFormats(), nil
+	}
+
+	var formats []Format
+	formats = append(formats, Format{ID: "best", Display: "Best available"})
+	for _, h := range resolutions {
+		formats = append(formats, Format{
+			ID:      fmt.Sprintf("%d", h),
+			Display: fmt.Sprintf("%dp", h),
+		})
+	}
+	formats = append(formats, Format{ID: "audio", Display: "Audio only"})
+	return formats, nil
 }
 
-func parseFormats(output string) []Format {
-	var formats []Format
+// parseResolutions extracts unique video heights from yt-dlp -F output.
+// Returns sorted descending (e.g., [2160, 1080, 720, 480, 360]).
+func parseResolutions(output string) []int {
+	seen := map[int]bool{}
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	headerPassed := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
-
-		// Skip until we pass the header separator
 		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "───") {
 			headerPassed = true
 			continue
@@ -45,63 +59,34 @@ func parseFormats(output string) []Format {
 			continue
 		}
 
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		f := parseSingleFormat(line)
-		if f.ID != "" {
-			formats = append(formats, f)
+		// Look for resolution like "1280x720" or "1920x1080"
+		for _, field := range strings.Fields(line) {
+			if strings.Contains(field, "x") && !strings.Contains(field, "http") {
+				parts := strings.Split(field, "x")
+				if len(parts) == 2 {
+					if h, err := strconv.Atoi(parts[1]); err == nil && h > 0 {
+						seen[h] = true
+					}
+				}
+			}
 		}
 	}
 
-	return formats
+	var heights []int
+	for h := range seen {
+		heights = append(heights, h)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(heights)))
+	return heights
 }
 
-func parseSingleFormat(line string) Format {
-	// yt-dlp format lines look like:
-	// 251          webm       audio only audio_quality_medium  128k , webm_dash ...
-	// 22           mp4        1280x720   30    ...
-	// 137          mp4        1920x1080  30    ...
-	fields := strings.Fields(line)
-	if len(fields) < 3 {
-		return Format{}
-	}
-
-	f := Format{
-		ID:        fields[0],
-		Extension: fields[1],
-		Display:   line,
-	}
-
-	// Try to find resolution
-	for _, field := range fields[2:] {
-		if strings.Contains(field, "x") && !strings.Contains(field, "http") {
-			f.Resolution = field
-			break
-		}
-		if field == "audio" {
-			f.Resolution = "audio only"
-			break
-		}
-	}
-
-	// Build note from remaining fields
-	if len(fields) > 3 {
-		f.Note = strings.Join(fields[2:], " ")
-	}
-
-	return f
-}
-
-// CommonFormats returns a simplified list of common quality presets.
-func CommonFormats() []Format {
+// DefaultFormats returns fallback quality presets when yt-dlp is unavailable.
+func DefaultFormats() []Format {
 	return []Format{
-		{ID: "bestvideo[height<=2160]+bestaudio/best", Resolution: "2160p", Display: "Best (up to 4K)"},
-		{ID: "bestvideo[height<=1080]+bestaudio/best", Resolution: "1080p", Display: "1080p (Full HD)"},
-		{ID: "bestvideo[height<=720]+bestaudio/best", Resolution: "720p", Display: "720p (HD)"},
-		{ID: "bestvideo[height<=480]+bestaudio/best", Resolution: "480p", Display: "480p"},
-		{ID: "bestaudio/best", Resolution: "audio", Display: "Audio only (best)"},
+		{ID: "best", Display: "Best available"},
+		{ID: "1080", Display: "1080p"},
+		{ID: "720", Display: "720p"},
+		{ID: "480", Display: "480p"},
+		{ID: "audio", Display: "Audio only"},
 	}
 }

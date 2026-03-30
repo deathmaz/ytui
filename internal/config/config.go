@@ -19,6 +19,7 @@ type Config struct {
 type PlayerConfig struct {
 	Command string   `toml:"command"`
 	Args    []string `toml:"args"`
+	Quality string   `toml:"quality"` // default quality (e.g., "1080", "720", "best", "audio")
 }
 
 // DownloadConfig configures video downloads.
