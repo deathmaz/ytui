@@ -79,32 +79,46 @@ type Model struct {
 	authenticating  bool
 }
 
-// New creates a new root model with the given YouTube client and config.
-func New(client youtube.Client, cfg *config.Config) *Model {
+// Options holds startup options from command-line flags.
+type Options struct {
+	SearchQuery string
+}
+
+// New creates a new root model with the given YouTube client, config, and options.
+func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 	h := help.New()
 	h.ShortSeparator = "  "
 	imgR := ytimage.NewRenderer()
+	s := search.New(client)
+	if opts.SearchQuery != "" {
+		s.SetQuery(opts.SearchQuery)
+	}
 	return &Model{
-		activeView: ViewSearch,
-		keys:       DefaultKeyMap(),
-		help:       h,
-		search:     search.New(client),
-		detail:     detail.New(client, imgR),
-		feed:       feed.New(client),
-		subs:       subs.New(client),
-		comments:   comments.New(client),
-		imgR:       imgR,
-		ytClient:   client,
-		picker:     picker.New(),
-		cfg:        cfg,
+		activeView:  ViewSearch,
+		keys:        DefaultKeyMap(),
+		help:        h,
+		search:      s,
+		detail:      detail.New(client, imgR),
+		feed:        feed.New(client),
+		subs:        subs.New(client),
+		comments:    comments.New(client),
+		imgR:        imgR,
+		ytClient:    client,
+		picker:      picker.New(),
+		cfg:         cfg,
 	}
 }
 
 func (m *Model) Init() tea.Cmd {
+	var cmds []tea.Cmd
+	cmds = append(cmds, m.search.Init())
 	if m.cfg.Auth.AuthOnStartup {
-		return tea.Batch(m.search.Init(), m.authenticate())
+		cmds = append(cmds, m.authenticate())
 	}
-	return m.search.Init()
+	if m.search.Query() != "" {
+		cmds = append(cmds, m.search.Refresh())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

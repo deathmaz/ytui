@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -11,6 +12,9 @@ import (
 )
 
 func main() {
+	search := flag.String("search", "", "search query to execute on startup")
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading config: %v\n", err)
@@ -23,7 +27,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := app.New(client, cfg)
+	opts := app.Options{
+		SearchQuery: *search,
+	}
+	m := app.New(client, cfg, opts)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {

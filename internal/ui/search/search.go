@@ -229,6 +229,14 @@ func (m Model) InputFocused() bool {
 	return m.focused == focusInput
 }
 
+// SetQuery sets the search query and input value.
+func (m *Model) SetQuery(q string) {
+	m.query = q
+	m.input.SetValue(q)
+	m.input.Blur()
+	m.focused = focusList
+}
+
 // Query returns the current search query.
 func (m Model) Query() string {
 	return m.query

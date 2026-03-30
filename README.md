@@ -37,7 +37,8 @@ go build ./cmd/ytui
 ## Usage
 
 ```sh
-ytui
+ytui                        # start with empty search
+ytui -search "go tutorial"  # search immediately on startup
 ```
 
 ## Keybindings
