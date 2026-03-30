@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"os/exec"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -167,6 +170,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.startDownload()
 			case key.Matches(msg, m.keys.Auth):
 				return m, m.authenticate()
+			case key.Matches(msg, m.keys.Open):
+				return m, m.openInBrowser()
+			case key.Matches(msg, m.keys.Yank):
+				return m, m.copyURL()
+			case key.Matches(msg, m.keys.Refresh):
+				return m, m.refresh()
 			}
 		}
 
@@ -347,6 +356,7 @@ func (m *Model) startDownload() tea.Cmd {
 func (m *Model) setStatus(msg string, clearAfter time.Duration) tea.Cmd {
 	m.statusSeq++
 	m.statusMsg = msg
+	m.resizeViews()
 	seq := m.statusSeq
 	return tea.Tick(clearAfter, func(time.Time) tea.Msg {
 		return clearStatusMsg{seq: seq}
@@ -374,6 +384,73 @@ func (m *Model) authenticate() tea.Cmd {
 		}
 		return authSuccessMsg{client: newClient}
 	}
+}
+
+func (m *Model) openInBrowser() tea.Cmd {
+	v := m.selectedVideo()
+	if v == nil {
+		return nil
+	}
+	url := v.URL
+	return tea.Batch(
+		m.setStatus("Opening in browser...", 2*time.Second),
+		func() tea.Msg {
+			var cmd *exec.Cmd
+			switch runtime.GOOS {
+			case "darwin":
+				cmd = exec.Command("open", url)
+			case "windows":
+				cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+			default:
+				cmd = exec.Command("xdg-open", url)
+			}
+			cmd.Start()
+			return nil
+		},
+	)
+}
+
+func (m *Model) copyURL() tea.Cmd {
+	v := m.selectedVideo()
+	if v == nil {
+		return nil
+	}
+	url := v.URL
+	return tea.Batch(
+		m.setStatus("URL copied: "+url, 3*time.Second),
+		func() tea.Msg {
+			var cmd *exec.Cmd
+			switch runtime.GOOS {
+			case "darwin":
+				cmd = exec.Command("pbcopy")
+			case "windows":
+				cmd = exec.Command("clip")
+			default:
+				cmd = exec.Command("xclip", "-selection", "clipboard")
+			}
+			cmd.Stdin = strings.NewReader(url)
+			if err := cmd.Run(); err != nil {
+				cmd = exec.Command("xsel", "--clipboard", "--input")
+				cmd.Stdin = strings.NewReader(url)
+				cmd.Run()
+			}
+			return nil
+		},
+	)
+}
+
+func (m *Model) refresh() tea.Cmd {
+	switch m.activeView {
+	case ViewFeed:
+		return m.feed.Load(true)
+	case ViewSubs:
+		return m.subs.Load(true)
+	case ViewSearch:
+		if q := m.search.Query(); q != "" {
+			return m.search.Refresh()
+		}
+	}
+	return nil
 }
 
 func playVideoCmd(url, format, playerCmd string, playerArgs []string) tea.Cmd {

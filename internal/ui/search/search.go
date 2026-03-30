@@ -229,6 +229,23 @@ func (m Model) InputFocused() bool {
 	return m.focused == focusInput
 }
 
+// Query returns the current search query.
+func (m Model) Query() string {
+	return m.query
+}
+
+// Refresh re-executes the current search query.
+func (m *Model) Refresh() tea.Cmd {
+	if m.query == "" || m.searching {
+		return nil
+	}
+	m.nextToken = ""
+	m.searching = true
+	m.results.SetItems(nil)
+	m.results.ResetSelected()
+	return tea.Batch(m.spinner.Tick, m.searchCmd(m.query, "", false))
+}
+
 // SelectedVideo returns the currently selected video, if any.
 func (m Model) SelectedVideo() (youtube.Video, bool) {
 	if item, ok := m.results.SelectedItem().(videoItem); ok {

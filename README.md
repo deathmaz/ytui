@@ -58,6 +58,9 @@ ytui
 | `l` / `h` | Expand / collapse replies |
 | `L` | Load more (comments / search results) |
 | `a` | Authenticate (extract browser cookies) |
+| `o` | Open video in browser |
+| `y` | Copy video URL to clipboard |
+| `r` | Refresh current view |
 | `?` | Toggle help |
 | `q` | Quit |
 | `Ctrl+c` | Force quit |
