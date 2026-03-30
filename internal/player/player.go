@@ -7,8 +7,10 @@ import (
 )
 
 // Play launches the player as a detached background process.
-func Play(url, ytdlFormat, playerCmd string) error {
-	args := []string{"--no-terminal"}
+// extraArgs are additional arguments from the config file.
+func Play(url, ytdlFormat, playerCmd string, extraArgs []string) error {
+	var args []string
+	args = append(args, extraArgs...)
 	if ytdlFormat != "" {
 		args = append(args, "--ytdl-format="+ytdlFormat)
 	}

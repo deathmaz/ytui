@@ -3,6 +3,7 @@ module github.com/deathmaz/ytui
 go 1.25.7
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/browserutils/kooky v0.2.9
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10

@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/auth"
+	"github.com/deathmaz/ytui/internal/config"
 	"github.com/deathmaz/ytui/internal/download"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
@@ -64,11 +65,9 @@ type Model struct {
 	subs       subs.Model
 	comments   comments.Model
 	ytClient   youtube.Client
-	imgR       *ytimage.Renderer
-	picker     picker.Model
-	playerCmd   string
-	downloadCmd string
-	browser     string
+	imgR   *ytimage.Renderer
+	picker picker.Model
+	cfg    *config.Config
 
 	pendingVideoURL string
 	statusMsg       string
@@ -77,8 +76,8 @@ type Model struct {
 	authenticating  bool
 }
 
-// New creates a new root model with the given YouTube client.
-func New(client youtube.Client) *Model {
+// New creates a new root model with the given YouTube client and config.
+func New(client youtube.Client, cfg *config.Config) *Model {
 	h := help.New()
 	h.ShortSeparator = "  "
 	imgR := ytimage.NewRenderer()
@@ -93,14 +92,15 @@ func New(client youtube.Client) *Model {
 		comments:   comments.New(client),
 		imgR:       imgR,
 		ytClient:   client,
-		picker:      picker.New(),
-		playerCmd:   "mpv",
-		downloadCmd: "yt-dlp",
-		browser:     "brave",
+		picker:     picker.New(),
+		cfg:        cfg,
 	}
 }
 
 func (m *Model) Init() tea.Cmd {
+	if m.cfg.Auth.AuthOnStartup {
+		return tea.Batch(m.search.Init(), m.authenticate())
+	}
 	return m.search.Init()
 }
 
@@ -182,9 +182,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingVideoURL != "" {
 			url := m.pendingVideoURL
 			format := msg.Format.ID
-			cmd := m.playerCmd
 			m.pendingVideoURL = ""
-			return m, playVideoCmd(url, format, cmd)
+			return m, playVideoCmd(url, format, m.cfg.Player.Command, m.cfg.Player.Args)
 		}
 		return m, nil
 
@@ -211,7 +210,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.subs = subs.New(msg.client)
 		m.comments = comments.New(msg.client)
 		m.resizeViews()
-		return m, m.setStatus("Authenticated via "+m.browser, 3*time.Second)
+		return m, m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second)
 
 	case authResultMsg:
 		m.authenticating = false
@@ -338,9 +337,9 @@ func (m *Model) startDownload() tea.Cmd {
 	m.downloading = true
 	m.statusMsg = "Downloading: " + v.Title
 	url := v.URL
-	cmd := m.downloadCmd
+	dlCfg := m.cfg.Download
 	return func() tea.Msg {
-		result := download.Download(url, "", "", cmd)
+		result := download.Download(url, dlCfg.Format, dlCfg.OutputDir, dlCfg.Command)
 		return downloadResultMsg{result: result}
 	}
 }
@@ -362,7 +361,7 @@ func (m *Model) authenticate() tea.Cmd {
 		return m.setStatus("Already authenticated", 3*time.Second)
 	}
 	m.authenticating = true
-	m.statusMsg = "Authenticating via " + m.browser + "..."
+	m.statusMsg = "Authenticating via " + m.cfg.Auth.Browser + "..."
 	return func() tea.Msg {
 		jar, err := auth.ExtractCookies(context.Background())
 		if err != nil {
@@ -377,9 +376,9 @@ func (m *Model) authenticate() tea.Cmd {
 	}
 }
 
-func playVideoCmd(url, format, playerCmd string) tea.Cmd {
+func playVideoCmd(url, format, playerCmd string, playerArgs []string) tea.Cmd {
 	return func() tea.Msg {
-		if err := player.Play(url, format, playerCmd); err != nil {
+		if err := player.Play(url, format, playerCmd, playerArgs); err != nil {
 			return playerErrorMsg{err: err}
 		}
 		return nil
