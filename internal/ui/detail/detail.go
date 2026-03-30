@@ -42,6 +42,8 @@ type Model struct {
 	imgR           *ytimage.Renderer
 	thumbTransmit  string // transmit sequence, prepended to View() output
 	thumbPlace     string // placeholder grid, embedded in viewport content
+	thumbPending   bool   // true while thumbnail is loading (reserves space)
+	thumbFailed    bool   // true if thumbnail failed to load
 }
 
 // New creates a new detail view model.
@@ -70,6 +72,8 @@ func (m *Model) LoadVideo(id string) tea.Cmd {
 	m.video = nil
 	m.thumbTransmit = ""
 	m.thumbPlace = ""
+	m.thumbPending = false
+	m.thumbFailed = false
 	client := m.client
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
 		v, err := client.GetVideo(context.Background(), id)
@@ -97,33 +101,38 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.video = msg.Video
 		m.viewport = viewport.New(m.width, m.height)
 		m.viewport.KeyMap = viewportKeyMap()
-		m.viewport.SetContent(m.renderDetail())
 
-		// Fetch thumbnail async
+		// Start thumbnail fetch, reserve space immediately
 		if m.imgR != nil {
 			thumbURL := bestThumbnail(m.video)
-			tx, pl := m.imgR.Get(thumbURL)
-			if pl != "" {
-				m.thumbTransmit = tx
-				m.thumbPlace = pl
-				m.viewport.SetContent(m.renderDetail())
-				cmds = append(cmds, scheduleClearTransmit())
-			} else {
-				cmds = append(cmds, m.imgR.FetchCmd(thumbURL, thumbCols, thumbRows))
+			if thumbURL != "" {
+				tx, pl := m.imgR.Get(thumbURL)
+				if pl != "" {
+					m.thumbTransmit = tx
+					m.thumbPlace = pl
+					cmds = append(cmds, scheduleClearTransmit())
+				} else {
+					m.thumbPending = true
+					cmds = append(cmds, m.imgR.FetchCmd(thumbURL, thumbCols, thumbRows))
+				}
 			}
 		}
+		m.viewport.SetContent(m.renderDetail())
 		return m, tea.Batch(cmds...)
 
 	case ytimage.ThumbnailLoadedMsg:
+		m.thumbPending = false
 		if msg.Err == nil && msg.Placeholder != "" {
 			m.imgR.Store(msg.URL, msg.TransmitStr, msg.Placeholder)
 			m.thumbTransmit = msg.TransmitStr
 			m.thumbPlace = msg.Placeholder
-			if m.video != nil {
-				m.viewport.SetContent(m.renderDetail())
-			}
-			// Schedule clearing the transmit after Kitty has processed it
 			cmds = append(cmds, scheduleClearTransmit())
+		} else {
+			// Failed -- collapse the reserved space
+			m.thumbFailed = true
+		}
+		if m.video != nil {
+			m.viewport.SetContent(m.renderDetail())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -180,6 +189,11 @@ func (m Model) renderDetail() string {
 	if m.thumbPlace != "" {
 		b.WriteString(m.thumbPlace)
 		b.WriteString("\n\n")
+	} else if m.thumbPending {
+		// thumbPlace is thumbRows lines (thumbRows-1 newlines) + "\n\n" = thumbRows+1 newlines
+		for i := 0; i < thumbRows+1; i++ {
+			b.WriteByte('\n')
+		}
 	}
 
 	b.WriteString(styles.Title.MarginBottom(1).Width(m.width - 2).Render(v.Title))
