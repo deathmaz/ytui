@@ -37,8 +37,10 @@ go build ./cmd/ytui
 ## Usage
 
 ```sh
-ytui                        # start with empty search
+ytui                        # start in video mode
 ytui -search "go tutorial"  # search immediately on startup
+ytui -music                 # start in YouTube Music mode
+ytui -music -search "metallica"  # music mode with search
 ```
 
 ## Keybindings
@@ -87,6 +89,9 @@ format = ""                        # default yt-dlp format string
 [auth]
 browser = "brave"                  # browser: brave, chrome, chromium, firefox, edge
 auth_on_startup = false            # auto-authenticate on launch (default: false)
+
+[general]
+mode = "video"                     # "video" (default) or "music" for YouTube Music mode
 ```
 
 ## Authentication

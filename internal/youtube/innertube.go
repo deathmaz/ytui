@@ -18,6 +18,11 @@ func VideoURL(id string) string {
 	return "https://www.youtube.com/watch?v=" + id
 }
 
+// PlaylistURL returns the canonical playlist URL for a playlist ID.
+func PlaylistURL(id string) string {
+	return "https://www.youtube.com/playlist?list=" + id
+}
+
 // InnerTubeClient implements Client using YouTube's InnerTube API.
 type InnerTubeClient struct {
 	it            *innertubego.InnerTube

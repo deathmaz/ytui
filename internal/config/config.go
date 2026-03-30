@@ -10,9 +10,15 @@ import (
 
 // Config holds all ytui configuration.
 type Config struct {
+	General  GeneralConfig  `toml:"general"`
 	Player   PlayerConfig   `toml:"player"`
 	Download DownloadConfig `toml:"download"`
 	Auth     AuthConfig     `toml:"auth"`
+}
+
+// GeneralConfig holds general settings.
+type GeneralConfig struct {
+	Mode string `toml:"mode"` // "video" (default) or "music"
 }
 
 // PlayerConfig configures the video player.
@@ -38,6 +44,9 @@ type AuthConfig struct {
 // Default returns the default configuration.
 func Default() *Config {
 	return &Config{
+		General: GeneralConfig{
+			Mode: "video",
+		},
 		Player: PlayerConfig{
 			Command: "mpv",
 			Args:    []string{"--no-terminal"},
