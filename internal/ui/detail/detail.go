@@ -31,6 +31,8 @@ var (
 	downKey        = key.NewBinding(key.WithKeys("j", "down"))
 	pageDownKey    = key.NewBinding(key.WithKeys("ctrl+d", "ctrl+f", "pgdown"))
 	pageUpKey      = key.NewBinding(key.WithKeys("ctrl+u", "ctrl+b", "pgup"))
+	goTopKey       = key.NewBinding(key.WithKeys("g", "home"))
+	goBottomKey    = key.NewBinding(key.WithKeys("G", "end"))
 )
 
 const (
@@ -261,6 +263,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				case key.Matches(msg, pageUpKey):
 					m.moveCommentCursor(-5)
 					return m, nil
+				case key.Matches(msg, goTopKey):
+					m.moveCommentCursor(-m.totalCommentItems())
+					return m, nil
+				case key.Matches(msg, goBottomKey):
+					m.moveCommentCursor(m.totalCommentItems())
+					return m, nil
 				case key.Matches(msg, expandKey):
 					return m, m.expandAtCursor()
 				case key.Matches(msg, collapseKey):
@@ -274,6 +282,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 
 			switch {
+			case key.Matches(msg, goTopKey):
+				m.viewport.GotoTop()
+				return m, nil
+			case key.Matches(msg, goBottomKey):
+				m.viewport.GotoBottom()
+				return m, nil
 			case key.Matches(msg, commentModeKey):
 				if len(m.threads) > 0 {
 					m.commentFocus = true

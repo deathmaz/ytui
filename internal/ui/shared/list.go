@@ -14,5 +14,7 @@ func NewList(delegate list.ItemDelegate) list.Model {
 	l.SetFilteringEnabled(false)
 	l.SetShowPagination(true)
 	l.KeyMap.Quit = key.NewBinding()
+	l.KeyMap.GoToStart = key.NewBinding(key.WithKeys("g", "home"))
+	l.KeyMap.GoToEnd = key.NewBinding(key.WithKeys("G", "end"))
 	return l
 }
