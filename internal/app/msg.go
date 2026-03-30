@@ -7,6 +7,5 @@ const (
 	ViewFeed View = iota
 	ViewSubs
 	ViewSearch
-	ViewDetail
-	ViewComments
+	ViewVideoTab // a dynamic video tab (detail or comments sub-view)
 )
