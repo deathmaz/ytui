@@ -17,7 +17,6 @@ import (
 	"github.com/deathmaz/ytui/internal/download"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
-	"github.com/deathmaz/ytui/internal/ui/comments"
 	"github.com/deathmaz/ytui/internal/ui/detail"
 	"github.com/deathmaz/ytui/internal/ui/feed"
 	"github.com/deathmaz/ytui/internal/ui/picker"
@@ -61,12 +60,10 @@ const maxVideoTabs = 6
 
 // videoTab holds the state for a single video tab.
 type videoTab struct {
-	videoID         string
-	title           string
-	detail          detail.Model
-	comments        comments.Model
-	showingComments bool
-	formats         []player.Format // cached quality list from yt-dlp
+	videoID string
+	title   string
+	detail  detail.Model
+	formats []player.Format // cached quality list from yt-dlp
 }
 
 // Model is the root Bubble Tea model.
@@ -163,21 +160,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Esc handling
 		if key.Matches(msg, m.keys.Back) && !inputHasFocus {
 			if m.activeView == ViewVideoTab {
-				if tab := m.activeTab(); tab != nil && tab.showingComments {
-					// Go back from comments to detail, lazy-load if needed
-					tab.showingComments = false
-					if tab.detail.Video() == nil {
-						return m, tab.detail.LoadVideo(tab.videoID)
-					}
-					return m, nil
+				// If in comment mode, let detail handle Esc (exits comment mode)
+				if tab := m.activeTab(); tab != nil && tab.detail.InCommentMode() {
+					break
+				}
+				m.closeActiveVideoTab()
+				if len(m.videoTabs) > 0 {
+					m.activeTabIdx = len(m.videoTabs) - 1
 				} else {
-					// Close video tab
-					m.closeActiveVideoTab()
-					if len(m.videoTabs) > 0 {
-						m.activeTabIdx = len(m.videoTabs) - 1
-					} else {
-						m.activeView = m.prevView
-					}
+					m.activeView = m.prevView
 				}
 				return m, nil
 			}
@@ -207,8 +198,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.quickPlay()
 			case key.Matches(msg, m.keys.PlayPick):
 				return m, m.fetchFormatsAndPlay()
-			case key.Matches(msg, m.keys.Comments):
-				return m, m.openComments()
 			case key.Matches(msg, m.keys.Download):
 				return m, m.startDownload()
 			case key.Matches(msg, m.keys.Auth):
@@ -321,15 +310,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case ViewVideoTab:
 		if tab := m.activeTab(); tab != nil {
-			if tab.showingComments {
-				var cmd tea.Cmd
-				tab.comments, cmd = tab.comments.Update(msg)
-				cmds = append(cmds, cmd)
-			} else {
-				var cmd tea.Cmd
-				tab.detail, cmd = tab.detail.Update(msg)
-				cmds = append(cmds, cmd)
-			}
+			var cmd tea.Cmd
+			tab.detail, cmd = tab.detail.Update(msg)
+			cmds = append(cmds, cmd)
 		}
 	}
 
@@ -392,15 +375,12 @@ func (m *Model) openVideoTab(v *youtube.Video) tea.Cmd {
 	}
 
 	d := detail.New(m.ytClient, m.imgR)
-	c := comments.New(m.ytClient)
 	d.SetSize(m.width, m.contentHeight())
-	c.SetSize(m.width, m.contentHeight())
 
 	m.videoTabs = append(m.videoTabs, videoTab{
-		videoID:  v.ID,
-		title:    v.Title,
-		detail:   d,
-		comments: c,
+		videoID: v.ID,
+		title:   v.Title,
+		detail:  d,
 	})
 	m.activeTabIdx = len(m.videoTabs) - 1
 	m.activeView = ViewVideoTab
@@ -437,49 +417,6 @@ func (m *Model) selectedVideo() *youtube.Video {
 		if tab := m.activeTab(); tab != nil {
 			return tab.detail.Video()
 		}
-	}
-	return nil
-}
-
-func (m *Model) openComments() tea.Cmd {
-	if m.activeView != ViewVideoTab {
-		// From search/feed, open video tab and show comments directly
-		v := m.selectedVideo()
-		if v == nil {
-			return nil
-		}
-		// Create tab without loading detail (will load lazily on Esc back)
-		if len(m.videoTabs) >= maxVideoTabs {
-			return m.setStatus("Max video tabs reached (close one with Esc)", 3*time.Second)
-		}
-		d := detail.New(m.ytClient, m.imgR)
-		c := comments.New(m.ytClient)
-		d.SetSize(m.width, m.contentHeight())
-		c.SetSize(m.width, m.contentHeight())
-		m.videoTabs = append(m.videoTabs, videoTab{
-			videoID:         v.ID,
-			title:           v.Title,
-			detail:          d,
-			comments:        c,
-			showingComments: true,
-		})
-		m.activeTabIdx = len(m.videoTabs) - 1
-		m.activeView = ViewVideoTab
-		return c.LoadComments(v.CommentsToken)
-	}
-	// Already on a video tab, toggle to comments
-	tab := m.activeTab()
-	if tab == nil {
-		return nil
-	}
-	if tab.showingComments {
-		tab.showingComments = false
-		return nil
-	}
-	tab.showingComments = true
-	v := tab.detail.Video()
-	if v != nil {
-		return tab.comments.LoadComments(v.CommentsToken)
 	}
 	return nil
 }
@@ -670,7 +607,6 @@ func (m *Model) resizeViews() {
 	m.subs.SetSize(m.width, ch)
 	for i := range m.videoTabs {
 		m.videoTabs[i].detail.SetSize(m.width, ch)
-		m.videoTabs[i].comments.SetSize(m.width, ch)
 	}
 }
 
@@ -719,9 +655,6 @@ func (m *Model) renderContent() string {
 		return m.subs.View()
 	case ViewVideoTab:
 		if tab := m.activeTab(); tab != nil {
-			if tab.showingComments {
-				return tab.comments.View()
-			}
 			return tab.detail.View()
 		}
 	}

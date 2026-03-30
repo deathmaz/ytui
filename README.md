@@ -56,8 +56,8 @@ ytui -search "go tutorial"  # search immediately on startup
 | `p` | Play video (default/config quality) |
 | `P` | Play video (pick quality from list) |
 | `d` | Download video |
-| `c` | View comments |
-| `l` / `h` | Expand / collapse replies |
+| `c` | Enter comment focus mode (in detail view) |
+| `l` / `h` | Expand / collapse replies (in comment mode) |
 | `L` | Load more (comments / search results) |
 | `a` | Authenticate (extract browser cookies) |
 | `o` | Open video in browser |
