@@ -79,13 +79,15 @@ output_dir = "~/Videos/ytui"       # download directory (default: "~/Videos/ytui
 format = ""                        # default yt-dlp format string
 
 [auth]
-browser = "brave"                  # browser for cookie extraction (currently only "brave" supported)
+browser = "brave"                  # browser: brave, chrome, chromium, firefox, edge
 auth_on_startup = false            # auto-authenticate on launch (default: false)
 ```
 
 ## Authentication
 
-ytui extracts YouTube session cookies from your browser to access subscriptions and feed. Cookies are held in memory only -- never written to disk. Configure which browser to use in the `[auth]` section of the config file.
+ytui extracts YouTube session cookies from your browser to access subscriptions and feed. Cookies are held in memory only -- never written to disk.
+
+Supported browsers: **Brave**, **Chrome**, **Chromium**, **Firefox**, **Edge**. Configure which one in the `[auth]` section of the config file.
 
 - Press `a` to authenticate manually
 - Set `auth_on_startup = true` in config for automatic authentication

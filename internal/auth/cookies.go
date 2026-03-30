@@ -11,20 +11,70 @@ import (
 
 	"github.com/browserutils/kooky"
 	"github.com/browserutils/kooky/browser/brave"
+	"github.com/browserutils/kooky/browser/chrome"
+	"github.com/browserutils/kooky/browser/chromium"
+	"github.com/browserutils/kooky/browser/edge"
+	"github.com/browserutils/kooky/browser/firefox"
 )
 
-// Default Brave cookie file paths to try (varies by Chromium version).
-var braveCookiePaths = []string{
-	".config/BraveSoftware/Brave-Browser/Default/Cookies",
-	".config/BraveSoftware/Brave-Browser/Default/Network/Cookies",
+// SupportedBrowsers lists the browsers that can be used for cookie extraction.
+var SupportedBrowsers = []string{"brave", "chrome", "chromium", "firefox", "edge"}
+
+type browserReader func(ctx context.Context, filename string, filters ...kooky.Filter) ([]*kooky.Cookie, error)
+
+// browserConfig maps browser names to their cookie reader and possible cookie file paths.
+var browserConfigs = map[string]struct {
+	reader browserReader
+	paths  []string // relative to home directory
+}{
+	"brave": {
+		reader: brave.ReadCookies,
+		paths: []string{
+			".config/BraveSoftware/Brave-Browser/Default/Cookies",
+			".config/BraveSoftware/Brave-Browser/Default/Network/Cookies",
+		},
+	},
+	"chrome": {
+		reader: chrome.ReadCookies,
+		paths: []string{
+			".config/google-chrome/Default/Cookies",
+			".config/google-chrome/Default/Network/Cookies",
+		},
+	},
+	"chromium": {
+		reader: chromium.ReadCookies,
+		paths: []string{
+			".config/chromium/Default/Cookies",
+			".config/chromium/Default/Network/Cookies",
+		},
+	},
+	"firefox": {
+		reader: firefox.ReadCookies,
+		paths: []string{
+			".mozilla/firefox/*.default-release/cookies.sqlite",
+			".mozilla/firefox/*.default/cookies.sqlite",
+		},
+	},
+	"edge": {
+		reader: edge.ReadCookies,
+		paths: []string{
+			".config/microsoft-edge/Default/Cookies",
+			".config/microsoft-edge/Default/Network/Cookies",
+		},
+	},
 }
 
-// ExtractCookies reads YouTube cookies from Brave browser into an
+// ExtractCookies reads YouTube cookies from the specified browser into an
 // in-memory cookie jar. Cookies are never written to disk.
-func ExtractCookies(ctx context.Context) (http.CookieJar, error) {
-	cookieFile, err := findCookieFile()
+func ExtractCookies(ctx context.Context, browser string) (http.CookieJar, error) {
+	cfg, ok := browserConfigs[browser]
+	if !ok {
+		return nil, fmt.Errorf("unsupported browser %q (supported: %v)", browser, SupportedBrowsers)
+	}
+
+	cookieFile, err := findCookieFile(cfg.paths)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s cookie file not found: %w", browser, err)
 	}
 
 	filters := []kooky.Filter{
@@ -32,12 +82,12 @@ func ExtractCookies(ctx context.Context) (http.CookieJar, error) {
 		kooky.DomainHasSuffix("youtube.com"),
 	}
 
-	cookies, err := brave.ReadCookies(ctx, cookieFile, filters...)
+	cookies, err := cfg.reader(ctx, cookieFile, filters...)
 	if err != nil {
-		return nil, fmt.Errorf("read cookies from %s: %w", cookieFile, err)
+		return nil, fmt.Errorf("read %s cookies from %s: %w", browser, cookieFile, err)
 	}
 	if len(cookies) == 0 {
-		return nil, fmt.Errorf("no YouTube cookies found in Brave (are you logged in?)")
+		return nil, fmt.Errorf("no YouTube cookies found in %s (are you logged in?)", browser)
 	}
 
 	jar, err := cookiejar.New(nil)
@@ -48,11 +98,10 @@ func ExtractCookies(ctx context.Context) (http.CookieJar, error) {
 	byDomain := map[string][]*http.Cookie{}
 	for _, c := range cookies {
 		hc := &c.Cookie
-		domain := hc.Domain
-		if domain == "" {
+		if hc.Domain == "" {
 			continue
 		}
-		byDomain[domain] = append(byDomain[domain], hc)
+		byDomain[hc.Domain] = append(byDomain[hc.Domain], hc)
 	}
 
 	for domain, hcookies := range byDomain {
@@ -67,20 +116,20 @@ func ExtractCookies(ctx context.Context) (http.CookieJar, error) {
 	return jar, nil
 }
 
-func findCookieFile() (string, error) {
+func findCookieFile(paths []string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
-	for _, rel := range braveCookiePaths {
-		path := filepath.Join(home, rel)
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
+	for _, rel := range paths {
+		matches, _ := filepath.Glob(filepath.Join(home, rel))
+		if len(matches) > 0 {
+			return matches[0], nil
 		}
 	}
 
-	return "", fmt.Errorf("Brave cookie file not found (tried %v)", braveCookiePaths)
+	return "", fmt.Errorf("tried paths: %v", paths)
 }
 
 // HTTPClient creates an http.Client with the given cookie jar and SAPISIDHASH
@@ -88,7 +137,6 @@ func findCookieFile() (string, error) {
 func HTTPClient(jar http.CookieJar) *http.Client {
 	client := &http.Client{Jar: jar}
 
-	// Find SAPISID cookie for auth header
 	ytURL, _ := url.Parse("https://www.youtube.com")
 	for _, c := range jar.Cookies(ytURL) {
 		if c.Name == "SAPISID" {

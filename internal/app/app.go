@@ -363,7 +363,7 @@ func (m *Model) authenticate() tea.Cmd {
 	m.authenticating = true
 	m.statusMsg = "Authenticating via " + m.cfg.Auth.Browser + "..."
 	return func() tea.Msg {
-		jar, err := auth.ExtractCookies(context.Background())
+		jar, err := auth.ExtractCookies(context.Background(), m.cfg.Auth.Browser)
 		if err != nil {
 			return authResultMsg{err: err}
 		}
