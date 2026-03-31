@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/deathmaz/ytui/internal/auth"
 	"github.com/deathmaz/ytui/internal/config"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
@@ -27,6 +28,7 @@ func (k musicKeyMap) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next section")),
 		key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "load all")),
+		key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "auth")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	}
@@ -38,6 +40,14 @@ func (k musicKeyMap) FullHelp() [][]key.Binding {
 
 const maxMusicTabs = 6
 
+type musicFixedView int
+
+const (
+	musicViewHome    musicFixedView = 0
+	musicViewLibrary musicFixedView = 1
+	musicViewSearch  musicFixedView = 2
+)
+
 type musicTabKind int
 
 const (
@@ -45,9 +55,10 @@ const (
 	musicTabAlbum
 )
 
-type artistSubTab struct {
-	title string
-	list  list.Model
+type subTab struct {
+	title        string
+	list         list.Model
+	continuation string // for library pagination
 }
 
 type musicTab struct {
@@ -56,12 +67,24 @@ type musicTab struct {
 	browseID     string
 	// Artist page
 	artistPage   *youtube.MusicArtistPage
-	artistSubs   []artistSubTab
+	artistSubs   []subTab
 	activeSubTab int
 	// Album page
 	albumPage    *youtube.MusicAlbumPage
 	albumList    list.Model
 	loaded       bool
+}
+
+type musicHomeLoadedMsg struct {
+	Shelves []youtube.MusicShelf
+	Err     error
+}
+
+type musicLibrarySectionMsg struct {
+	Index        int
+	Items        []youtube.MusicItem
+	Continuation string
+	Err          error
 }
 
 type musicSearchResultMsg struct {
@@ -70,13 +93,15 @@ type musicSearchResultMsg struct {
 }
 
 type musicArtistLoadedMsg struct {
-	Artist *youtube.MusicArtistPage
-	Err    error
+	BrowseID string
+	Artist   *youtube.MusicArtistPage
+	Err      error
 }
 
 type musicAlbumLoadedMsg struct {
-	Album *youtube.MusicAlbumPage
-	Err   error
+	BrowseID string
+	Album    *youtube.MusicAlbumPage
+	Err      error
 }
 
 type musicMoreLoadedMsg struct {
@@ -84,6 +109,9 @@ type musicMoreLoadedMsg struct {
 	Items     []youtube.MusicItem
 	Err       error
 }
+
+type musicAuthSuccessMsg struct{ client *youtube.MusicClient }
+type musicAuthFailedMsg struct{ err error }
 
 // musicItem wraps a MusicItem for the list component.
 type musicItem struct {
@@ -96,7 +124,7 @@ func (m musicItem) Description() string { return m.item.Subtitle }
 
 // MusicModel is the root Bubble Tea model for music mode.
 type MusicModel struct {
-	onSearch     bool // true = search view active, false = a music tab is active
+	onFixedView  bool // true = fixed view (home/library/search), false = dynamic tab
 	width        int
 	height       int
 	keys         KeyMap
@@ -104,7 +132,8 @@ type MusicModel struct {
 	client       *youtube.MusicClient
 	cfg          *config.Config
 
-	// Search
+	// Fixed views
+	activeFixed   musicFixedView
 	searchInput   textinput.Model
 	searchResults list.Model
 	searchSpinner spinner.Model
@@ -112,13 +141,27 @@ type MusicModel struct {
 	searchFocused bool
 	query         string
 
+	// Home
+	homeSubs   []subTab
+	homeSubIdx int
+	homeLoaded  bool
+	homeLoading bool
+
+	// Library
+	librarySubs    []subTab
+	librarySubIdx  int
+	libraryLoaded  bool
+	libraryLoading bool
+	libraryPending int // number of sections still loading
+
 	// Dynamic tabs
 	tabs         []musicTab
 	activeTabIdx int
 	pageLoading  bool
 
-	statusMsg string
-	statusSeq int
+	authenticating bool
+	statusMsg      string
+	statusSeq      int
 }
 
 // NewMusic creates a new root model for music mode.
@@ -136,7 +179,8 @@ func NewMusic(client *youtube.MusicClient, cfg *config.Config, opts Options) *Mu
 	l := shared.NewList(musicDelegate{})
 
 	m := &MusicModel{
-		onSearch:      true,
+		onFixedView:   true,
+		activeFixed:   musicViewSearch,
 		keys:          DefaultKeyMap(),
 		help:          h,
 		client:        client,
@@ -159,6 +203,9 @@ func NewMusic(client *youtube.MusicClient, cfg *config.Config, opts Options) *Mu
 
 func (m *MusicModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{textinput.Blink}
+	if m.cfg.Auth.AuthOnStartup {
+		cmds = append(cmds, m.authenticate())
+	}
 	if m.query != "" {
 		m.searching = true
 		cmds = append(cmds, m.searchSpinner.Tick, m.searchCmd(m.query))
@@ -214,15 +261,18 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 		case key.Matches(msg, m.keys.Back):
-			if !m.onSearch {
+			if !m.onFixedView {
 				// Close current tab
 				m.closeActiveTab()
 				return m, nil
 			}
 		case key.Matches(msg, m.keys.Play):
 			return m, m.playSelected()
+		case key.Matches(msg, m.keys.Auth):
+			return m, m.authenticate()
 		case key.Matches(msg, m.keys.Search), msg.String() == "/":
-			m.onSearch = true
+			m.onFixedView = true
+			m.activeFixed = musicViewSearch
 			m.searchFocused = true
 			m.searchInput.Focus()
 			return m, textinput.Blink
@@ -230,23 +280,32 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.openSelected()
 		}
 
-		// Tab number keys: 1 = search, 2+ = dynamic tabs
+		// Tab keys: 1=Home, 2=Library, 3=Search, 4+=dynamic tabs
 		if k := msg.String(); len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
 			idx := int(k[0] - '1')
-			if idx == 0 {
-				m.onSearch = true
+			if idx <= 2 {
+				m.onFixedView = true
+				m.activeFixed = musicFixedView(idx)
+				m.searchFocused = false
+				m.searchInput.Blur()
+				switch m.activeFixed {
+				case musicViewHome:
+					return m, m.loadHome()
+				case musicViewLibrary:
+					return m, m.loadLibrary()
+				}
 				return m, nil
 			}
-			tabIdx := idx - 1
+			tabIdx := idx - 3
 			if tabIdx < len(m.tabs) {
-				m.onSearch = false
+				m.onFixedView = false
 				m.activeTabIdx = tabIdx
 				return m, nil
 			}
 		}
 
 		// Sub-tab navigation for artist pages
-		if !m.onSearch {
+		if !m.onFixedView {
 			if tab := m.activeTab(); tab != nil && tab.kind == musicTabArtist && tab.loaded {
 				if msg.String() == "tab" {
 					if tab.activeSubTab < len(tab.artistSubs)-1 {
@@ -268,11 +327,59 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Sub-tab navigation for home and library views
+		if m.onFixedView && m.activeFixed == musicViewHome && m.homeLoaded {
+			if msg.String() == "tab" {
+				if m.homeSubIdx < len(m.homeSubs)-1 {
+					m.homeSubIdx++
+				}
+				return m, nil
+			}
+			if msg.String() == "shift+tab" {
+				if m.homeSubIdx > 0 {
+					m.homeSubIdx--
+				}
+				return m, nil
+			}
+		}
+		if m.onFixedView && m.activeFixed == musicViewLibrary && m.libraryLoaded {
+			if msg.String() == "tab" {
+				if m.librarySubIdx < len(m.librarySubs)-1 {
+					m.librarySubIdx++
+				}
+				return m, nil
+			}
+			if msg.String() == "shift+tab" {
+				if m.librarySubIdx > 0 {
+					m.librarySubIdx--
+				}
+				return m, nil
+			}
+			if msg.String() == "L" {
+				return m, m.loadMoreLibrary()
+			}
+		}
+
 		// Delegate to active list
-		if m.onSearch {
-			var cmd tea.Cmd
-			m.searchResults, cmd = m.searchResults.Update(msg)
-			cmds = append(cmds, cmd)
+		if m.onFixedView {
+			switch m.activeFixed {
+			case musicViewHome:
+				if m.homeLoaded && m.homeSubIdx < len(m.homeSubs) {
+					var cmd tea.Cmd
+					m.homeSubs[m.homeSubIdx].list, cmd = m.homeSubs[m.homeSubIdx].list.Update(msg)
+					cmds = append(cmds, cmd)
+				}
+			case musicViewLibrary:
+				if m.libraryLoaded && m.librarySubIdx < len(m.librarySubs) {
+					var cmd tea.Cmd
+					m.librarySubs[m.librarySubIdx].list, cmd = m.librarySubs[m.librarySubIdx].list.Update(msg)
+					cmds = append(cmds, cmd)
+				}
+			case musicViewSearch:
+				var cmd tea.Cmd
+				m.searchResults, cmd = m.searchResults.Update(msg)
+				cmds = append(cmds, cmd)
+			}
 		} else if tab := m.activeTab(); tab != nil {
 			switch tab.kind {
 			case musicTabArtist:
@@ -287,6 +394,46 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+
+	case musicHomeLoadedMsg:
+		m.homeLoading = false
+		if msg.Err != nil {
+			return m, m.setStatus("Home error: "+msg.Err.Error(), 5*time.Second)
+		}
+		m.homeLoaded = true
+		m.homeSubs = shelvesToSubTabs(msg.Shelves)
+		m.homeSubIdx = 0
+		return m, nil
+
+	case musicLibrarySectionMsg:
+		if msg.Err != nil {
+			m.libraryPending--
+			if m.libraryPending <= 0 {
+				m.libraryLoading = false
+				m.libraryLoaded = true
+			}
+			return m, m.setStatus("Library error: "+msg.Err.Error(), 5*time.Second)
+		}
+		if msg.Index < len(m.librarySubs) {
+			sub := &m.librarySubs[msg.Index]
+			// Append to existing items (for continuation loads)
+			existing := sub.list.Items()
+			for _, it := range msg.Items {
+				existing = append(existing, musicItem{item: it})
+			}
+			sub.list.SetItems(existing)
+			sub.continuation = msg.Continuation
+		}
+		if m.libraryPending > 0 {
+			m.libraryPending--
+		}
+		if m.libraryPending <= 0 {
+			m.libraryLoading = false
+			m.libraryLoaded = true
+			m.resizeViews()
+		}
+		m.statusMsg = ""
+		return m, nil
 
 	case musicSearchResultMsg:
 		m.searching = false
@@ -310,11 +457,15 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setStatus("Error: "+msg.Err.Error(), 5*time.Second)
 		}
-		if tab := m.activeTab(); tab != nil && tab.kind == musicTabArtist && !tab.loaded {
-			tab.artistPage = msg.Artist
-			tab.artistSubs = m.buildArtistSubTabs(msg.Artist)
-			tab.loaded = true
-			m.resizeViews()
+		for i := range m.tabs {
+			tab := &m.tabs[i]
+			if tab.browseID == msg.BrowseID && tab.kind == musicTabArtist && !tab.loaded {
+				tab.artistPage = msg.Artist
+				tab.artistSubs = m.buildArtistSubTabs(msg.Artist)
+				tab.loaded = true
+				m.resizeViews()
+				break
+			}
 		}
 		return m, nil
 
@@ -323,11 +474,15 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setStatus("Error: "+msg.Err.Error(), 5*time.Second)
 		}
-		if tab := m.activeTab(); tab != nil && tab.kind == musicTabAlbum && !tab.loaded {
-			tab.albumPage = msg.Album
-			tab.albumList = m.buildAlbumList(msg.Album)
-			tab.loaded = true
-			m.resizeViews()
+		for i := range m.tabs {
+			tab := &m.tabs[i]
+			if tab.browseID == msg.BrowseID && tab.kind == musicTabAlbum && !tab.loaded {
+				tab.albumPage = msg.Album
+				tab.albumList = m.buildAlbumList(msg.Album)
+				tab.loaded = true
+				m.resizeViews()
+				break
+			}
 		}
 		return m, nil
 
@@ -361,6 +516,30 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setStatus("Play error: "+msg.err.Error(), 5*time.Second)
 		}
 		return m, playVideoCmd(msg.url, m.cfg.Player.Quality, m.cfg.Player.Command, m.cfg.Player.Args)
+
+	case musicAuthSuccessMsg:
+		m.authenticating = false
+		m.client = msg.client
+		// Reset home/library so they reload with auth
+		m.homeLoaded = false
+		m.homeLoading = false
+		m.libraryLoaded = false
+		m.libraryLoading = false
+		m.librarySubs = nil
+		m.librarySubIdx = 0
+		m.resizeViews()
+		var reloadCmd tea.Cmd
+		switch m.activeFixed {
+		case musicViewHome:
+			reloadCmd = m.loadHome()
+		case musicViewLibrary:
+			reloadCmd = m.loadLibrary()
+		}
+		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), reloadCmd)
+
+	case musicAuthFailedMsg:
+		m.authenticating = false
+		return m, m.setStatus("Auth failed: "+msg.err.Error(), 5*time.Second)
 
 	case clearStatusMsg:
 		if msg.seq == m.statusSeq {
@@ -404,6 +583,81 @@ func (m *MusicModel) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
+func (m *MusicModel) loadHome() tea.Cmd {
+	if m.homeLoaded || m.homeLoading {
+		return nil
+	}
+	m.homeLoading = true
+	client := m.client
+	return tea.Batch(m.searchSpinner.Tick, func() (msg tea.Msg) {
+		defer func() {
+			if r := recover(); r != nil {
+				msg = musicHomeLoadedMsg{Err: fmt.Errorf("panic: %v", r)}
+			}
+		}()
+		shelves, err := client.GetHome(context.Background())
+		return musicHomeLoadedMsg{Shelves: shelves, Err: err}
+	})
+}
+
+func (m *MusicModel) loadLibrary() tea.Cmd {
+	if m.libraryLoaded || m.libraryLoading {
+		return nil
+	}
+	if !m.client.IsAuthenticated() {
+		return m.setStatus("Press 'a' to authenticate first", 3*time.Second)
+	}
+	m.libraryLoading = true
+
+	// Initialize sub-tabs with empty lists
+	sections := youtube.LibrarySections
+	m.librarySubs = make([]subTab, len(sections))
+	for i, sec := range sections {
+		m.librarySubs[i] = subTab{title: sec.Title, list: shared.NewList(musicDelegate{})}
+	}
+	m.librarySubIdx = 0
+	m.libraryPending = len(sections)
+
+	// Fetch all sections concurrently
+	client := m.client
+	var cmds []tea.Cmd
+	cmds = append(cmds, m.searchSpinner.Tick)
+	for i, sec := range sections {
+		idx := i
+		browseID := sec.BrowseID
+		cmds = append(cmds, func() (msg tea.Msg) {
+			defer func() {
+				if r := recover(); r != nil {
+					msg = musicLibrarySectionMsg{Index: idx, Err: fmt.Errorf("panic: %v", r)}
+				}
+			}()
+			res, err := client.GetLibrarySection(context.Background(), browseID)
+			if err != nil {
+				return musicLibrarySectionMsg{Index: idx, Err: err}
+			}
+			return musicLibrarySectionMsg{Index: idx, Items: res.Items, Continuation: res.Continuation}
+		})
+	}
+	return tea.Batch(cmds...)
+}
+
+func shelvesToSubTabs(shelves []youtube.MusicShelf) []subTab {
+	var subs []subTab
+	for _, shelf := range shelves {
+		if len(shelf.Items) == 0 {
+			continue
+		}
+		l := shared.NewList(musicDelegate{})
+		var items []list.Item
+		for _, it := range shelf.Items {
+			items = append(items, musicItem{item: it})
+		}
+		l.SetItems(items)
+		subs = append(subs, subTab{title: shelf.Title, list: l})
+	}
+	return subs
+}
+
 func (m *MusicModel) loadMoreForSubTab(tab *musicTab) tea.Cmd {
 	if tab.activeSubTab >= len(tab.artistSubs) || tab.artistPage == nil {
 		return nil
@@ -435,19 +689,19 @@ func (m *MusicModel) loadMoreForSubTab(tab *musicTab) tea.Cmd {
 }
 
 func (m *MusicModel) activeTab() *musicTab {
-	if m.onSearch || m.activeTabIdx >= len(m.tabs) {
+	if m.onFixedView || m.activeTabIdx >= len(m.tabs) {
 		return nil
 	}
 	return &m.tabs[m.activeTabIdx]
 }
 
 func (m *MusicModel) closeActiveTab() {
-	if m.onSearch || len(m.tabs) == 0 {
+	if m.onFixedView || len(m.tabs) == 0 {
 		return
 	}
 	m.tabs = append(m.tabs[:m.activeTabIdx], m.tabs[m.activeTabIdx+1:]...)
 	if len(m.tabs) == 0 {
-		m.onSearch = true
+		m.onFixedView = true
 	} else if m.activeTabIdx >= len(m.tabs) {
 		m.activeTabIdx = len(m.tabs) - 1
 	}
@@ -459,7 +713,7 @@ func (m *MusicModel) openSelected() tea.Cmd {
 		return nil
 	}
 	// Album tracks: Enter plays
-	if !m.onSearch {
+	if !m.onFixedView {
 		if tab := m.activeTab(); tab != nil && tab.kind == musicTabAlbum {
 			return m.playSelected()
 		}
@@ -495,7 +749,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 	// Check if already open
 	for i, tab := range m.tabs {
 		if tab.browseID == browseID {
-			m.onSearch = false
+			m.onFixedView = false
 			m.activeTabIdx = i
 			return nil
 		}
@@ -510,7 +764,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 		browseID: browseID,
 	})
 	m.activeTabIdx = len(m.tabs) - 1
-	m.onSearch = false
+	m.onFixedView = false
 	m.pageLoading = true
 
 	client := m.client
@@ -518,32 +772,20 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 	case musicTabArtist:
 		return tea.Batch(m.searchSpinner.Tick, func() tea.Msg {
 			artist, err := client.GetArtist(context.Background(), browseID)
-			return musicArtistLoadedMsg{Artist: artist, Err: err}
+			return musicArtistLoadedMsg{BrowseID: browseID, Artist: artist, Err: err}
 		})
 	case musicTabAlbum:
 		return tea.Batch(m.searchSpinner.Tick, func() tea.Msg {
 			album, err := client.GetAlbum(context.Background(), browseID)
-			return musicAlbumLoadedMsg{Album: album, Err: err}
+			return musicAlbumLoadedMsg{BrowseID: browseID, Album: album, Err: err}
 		})
 	}
 	return nil
 }
 
-func (m *MusicModel) buildArtistSubTabs(artist *youtube.MusicArtistPage) []artistSubTab {
-	var subs []artistSubTab
-	for _, shelf := range artist.Shelves {
-		if len(shelf.Items) == 0 {
-			continue
-		}
-		l := shared.NewList(musicDelegate{})
-		var items []list.Item
-		for _, it := range shelf.Items {
-			items = append(items, musicItem{item: it})
-		}
-		l.SetItems(items)
-		subs = append(subs, artistSubTab{title: shelf.Title, list: l})
-	}
-	return subs
+// buildArtistSubTabs is an alias for shelvesToSubTabs using artist page shelves.
+func (m *MusicModel) buildArtistSubTabs(artist *youtube.MusicArtistPage) []subTab {
+	return shelvesToSubTabs(artist.Shelves)
 }
 
 func (m *MusicModel) buildAlbumList(album *youtube.MusicAlbumPage) list.Model {
@@ -560,12 +802,22 @@ func (m *MusicModel) buildAlbumList(album *youtube.MusicAlbumPage) list.Model {
 func (m *MusicModel) renderTabs() string {
 	var rendered []string
 
-	// Fixed search tab
-	style := tabStyle
-	if m.onSearch {
-		style = activeTabStyle
+	// Fixed tabs
+	fixedTabs := []struct {
+		label string
+		view  musicFixedView
+	}{
+		{"[1] Home", musicViewHome},
+		{"[2] Library", musicViewLibrary},
+		{"[3] Search", musicViewSearch},
 	}
-	rendered = append(rendered, style.Render("[1] Search"))
+	for _, ft := range fixedTabs {
+		style := tabStyle
+		if m.onFixedView && m.activeFixed == ft.view {
+			style = activeTabStyle
+		}
+		rendered = append(rendered, style.Render(ft.label))
+	}
 
 	// Dynamic tabs
 	for i, tab := range m.tabs {
@@ -573,9 +825,9 @@ func (m *MusicModel) renderTabs() string {
 		if tab.kind == musicTabAlbum {
 			icon = "◉"
 		}
-		label := fmt.Sprintf("[%d] %s", i+2, shared.Truncate(icon+" "+tab.title, 22))
+		label := fmt.Sprintf("[%d] %s", i+4, shared.Truncate(icon+" "+tab.title, 22))
 		style := tabStyle
-		if !m.onSearch && m.activeTabIdx == i {
+		if !m.onFixedView && m.activeTabIdx == i {
 			style = activeTabStyle
 		}
 		rendered = append(rendered, style.Render(label))
@@ -590,8 +842,16 @@ func (m *MusicModel) renderContent() string {
 		return m.searchSpinner.View() + " Loading..."
 	}
 
-	if m.onSearch {
-		return m.renderSearch()
+	if m.onFixedView {
+		switch m.activeFixed {
+		case musicViewHome:
+			return m.renderHome()
+		case musicViewLibrary:
+			return m.renderLibrary()
+		case musicViewSearch:
+			return m.renderSearch()
+		}
+		return ""
 	}
 
 	if tab := m.activeTab(); tab != nil {
@@ -606,6 +866,67 @@ func (m *MusicModel) renderContent() string {
 		}
 	}
 	return ""
+}
+
+func (m *MusicModel) renderHome() string {
+	if m.homeLoading {
+		return m.searchSpinner.View() + " Loading home..."
+	}
+	if !m.homeLoaded || len(m.homeSubs) == 0 {
+		return styles.Dim.Render("Press 1 to load home feed")
+	}
+
+	subBar := renderSubTabBar(m.homeSubs, m.homeSubIdx)
+
+	ch := m.contentHeight()
+	overhead := lipgloss.Height(subBar)
+	if m.homeSubIdx < len(m.homeSubs) {
+		m.homeSubs[m.homeSubIdx].list.SetSize(m.width, ch-overhead)
+	}
+
+	activeList := ""
+	if m.homeSubIdx < len(m.homeSubs) {
+		activeList = m.homeSubs[m.homeSubIdx].list.View()
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, subBar, activeList)
+}
+
+func (m *MusicModel) renderLibrary() string {
+	if m.libraryLoading {
+		return m.searchSpinner.View() + " Loading library..."
+	}
+	if !m.libraryLoaded || len(m.librarySubs) == 0 {
+		return styles.Dim.Render("Press 'a' to authenticate, then press 2 for Library")
+	}
+
+	subBar := renderSubTabBar(m.librarySubs, m.librarySubIdx)
+
+	var hint string
+	if m.librarySubIdx < len(m.librarySubs) && m.librarySubs[m.librarySubIdx].continuation != "" {
+		hint = styles.Dim.Render("  Press L to load more")
+	}
+
+	ch := m.contentHeight()
+	overhead := lipgloss.Height(subBar)
+	if hint != "" {
+		overhead += lipgloss.Height(hint)
+	}
+	if m.librarySubIdx < len(m.librarySubs) {
+		m.librarySubs[m.librarySubIdx].list.SetSize(m.width, ch-overhead)
+	}
+
+	activeList := ""
+	if m.librarySubIdx < len(m.librarySubs) {
+		activeList = m.librarySubs[m.librarySubIdx].list.View()
+	}
+
+	var sections []string
+	sections = append(sections, subBar, activeList)
+	if hint != "" {
+		sections = append(sections, hint)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
 func (m *MusicModel) renderSearch() string {
@@ -629,21 +950,24 @@ var (
 	activeSubTabStyle = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(styles.Cyan)
 )
 
+func renderSubTabBar(subs []subTab, activeIdx int) string {
+	var labels []string
+	for i, sub := range subs {
+		style := subTabStyle
+		if i == activeIdx {
+			style = activeSubTabStyle
+		}
+		labels = append(labels, style.Render(sub.title))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, labels...)
+}
+
 func (m *MusicModel) renderArtistPage(tab *musicTab) string {
 	if len(tab.artistSubs) == 0 {
 		return styles.Dim.Render("No content")
 	}
 
-	// Sub-tab bar
-	var tabLabels []string
-	for i, sub := range tab.artistSubs {
-		style := subTabStyle
-		if i == tab.activeSubTab {
-			style = activeSubTabStyle
-		}
-		tabLabels = append(tabLabels, style.Render(sub.title))
-	}
-	subBar := lipgloss.JoinHorizontal(lipgloss.Top, tabLabels...)
+	subBar := renderSubTabBar(tab.artistSubs, tab.activeSubTab)
 
 	// Check if more items are available
 	var hint string
@@ -738,8 +1062,19 @@ type musicPlayReadyMsg struct {
 
 func (m *MusicModel) selectedMusicItem() *youtube.MusicItem {
 	var sel list.Item
-	if m.onSearch {
-		sel = m.searchResults.SelectedItem()
+	if m.onFixedView {
+		switch m.activeFixed {
+		case musicViewHome:
+			if m.homeLoaded && m.homeSubIdx < len(m.homeSubs) {
+				sel = m.homeSubs[m.homeSubIdx].list.SelectedItem()
+			}
+		case musicViewLibrary:
+			if m.libraryLoaded && m.librarySubIdx < len(m.librarySubs) {
+				sel = m.librarySubs[m.librarySubIdx].list.SelectedItem()
+			}
+		case musicViewSearch:
+			sel = m.searchResults.SelectedItem()
+		}
 	} else if tab := m.activeTab(); tab != nil {
 		switch tab.kind {
 		case musicTabArtist:
@@ -793,6 +1128,59 @@ func (m *MusicModel) playSelected() tea.Cmd {
 	}
 
 	return m.setStatus("Cannot play this item", 3*time.Second)
+}
+
+func (m *MusicModel) loadMoreLibrary() tea.Cmd {
+	if m.librarySubIdx >= len(m.librarySubs) {
+		return nil
+	}
+	sub := &m.librarySubs[m.librarySubIdx]
+	if sub.continuation == "" {
+		return m.setStatus("All items loaded", 2*time.Second)
+	}
+	cont := sub.continuation
+	idx := m.librarySubIdx
+	client := m.client
+	sub.continuation = "" // prevent double-load
+	return tea.Batch(
+		m.setStatus("Loading more "+sub.title+"...", 10*time.Second),
+		func() (msg tea.Msg) {
+			defer func() {
+				if r := recover(); r != nil {
+					msg = musicLibrarySectionMsg{Index: idx, Err: fmt.Errorf("panic: %v", r)}
+				}
+			}()
+			res, err := client.GetLibraryContinuation(context.Background(), cont)
+			if err != nil {
+				return musicLibrarySectionMsg{Index: idx, Err: err}
+			}
+			return musicLibrarySectionMsg{Index: idx, Items: res.Items, Continuation: res.Continuation}
+		},
+	)
+}
+
+func (m *MusicModel) authenticate() tea.Cmd {
+	if m.authenticating {
+		return nil
+	}
+	if m.client.IsAuthenticated() {
+		return m.setStatus("Already authenticated", 3*time.Second)
+	}
+	m.authenticating = true
+	m.statusMsg = "Authenticating via " + m.cfg.Auth.Browser + "..."
+	browser := m.cfg.Auth.Browser
+	return func() tea.Msg {
+		jar, err := auth.ExtractCookies(context.Background(), browser)
+		if err != nil {
+			return musicAuthFailedMsg{err: err}
+		}
+		httpClient := auth.HTTPClient(jar)
+		newClient, err := youtube.NewMusicClient(httpClient)
+		if err != nil {
+			return musicAuthFailedMsg{err: err}
+		}
+		return musicAuthSuccessMsg{client: newClient}
+	}
 }
 
 func (m *MusicModel) setStatus(msg string, clearAfter time.Duration) tea.Cmd {

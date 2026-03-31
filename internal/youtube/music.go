@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	innertubego "github.com/nezbut/innertube-go"
 	"github.com/tidwall/gjson"
@@ -12,7 +13,9 @@ import (
 
 // MusicClient provides YouTube Music API access via InnerTube WEB_REMIX client.
 type MusicClient struct {
-	it *innertubego.InnerTube
+	mu            sync.Mutex
+	it            *innertubego.InnerTube
+	authenticated bool
 }
 
 // NewMusicClient creates a new YouTube Music client.
@@ -22,12 +25,28 @@ func NewMusicClient(httpClient *http.Client) (*MusicClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("music innertube init: %w", err)
 	}
-	return &MusicClient{it: it}, nil
+	return &MusicClient{it: it, authenticated: httpClient != nil && httpClient.Jar != nil}, nil
+}
+
+// IsAuthenticated reports whether the client has valid credentials.
+func (c *MusicClient) IsAuthenticated() bool {
+	return c.authenticated
+}
+
+// getMusicBrowseTabs resolves the tabs array from either single or two-column browse responses.
+func getMusicBrowseTabs(data gjson.Result) gjson.Result {
+	tabs := data.Get("contents.singleColumnBrowseResultsRenderer.tabs")
+	if !tabs.Exists() {
+		tabs = data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	}
+	return tabs
 }
 
 // Search searches YouTube Music for the given query.
 func (c *MusicClient) Search(ctx context.Context, query string) (*MusicSearchResult, error) {
+	c.mu.Lock()
 	raw, err := c.it.Search(ctx, &query, nil, nil)
+	c.mu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("music search: %w", err)
 	}
@@ -36,11 +55,188 @@ func (c *MusicClient) Search(ctx context.Context, query string) (*MusicSearchRes
 
 // Browse fetches a YouTube Music browse page (home, album, artist, playlist).
 func (c *MusicClient) Browse(ctx context.Context, browseID string) (map[string]interface{}, error) {
+	c.mu.Lock()
 	raw, err := c.it.Browse(ctx, &browseID, nil, nil)
+	c.mu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("music browse: %w", err)
 	}
 	return raw, nil
+}
+
+// GetHome fetches the YouTube Music home feed.
+func (c *MusicClient) GetHome(ctx context.Context) ([]MusicShelf, error) {
+	browseID := "FEmusic_home"
+	raw, err := c.Browse(ctx, browseID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := toGJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	var shelves []MusicShelf
+	tabs := getMusicBrowseTabs(data)
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		sections := tab.Get("tabRenderer.content.sectionListRenderer.contents")
+		sections.ForEach(func(_, section gjson.Result) bool {
+			carousel := section.Get("musicCarouselShelfRenderer")
+			if !carousel.Exists() {
+				return true
+			}
+			title := carousel.Get("header.musicCarouselShelfBasicHeaderRenderer.title.runs.0.text").String()
+			var items []MusicItem
+			carousel.Get("contents").ForEach(func(_, entry gjson.Result) bool {
+				mtrir := entry.Get("musicTwoRowItemRenderer")
+				if mtrir.Exists() {
+					items = append(items, parseMusicTwoRowItem(mtrir))
+				}
+				mrlir := entry.Get("musicResponsiveListItemRenderer")
+				if mrlir.Exists() {
+					items = append(items, parseMusicListItem(mrlir))
+				}
+				return true
+			})
+			if len(items) > 0 {
+				shelves = append(shelves, MusicShelf{Title: title, Items: items})
+			}
+			return true
+		})
+		return true
+	})
+
+	return shelves, nil
+}
+
+// LibrarySection identifies a section of the user's YouTube Music library.
+type LibrarySection struct {
+	Title   string
+	BrowseID string
+}
+
+// LibrarySections lists all fetchable library sections.
+var LibrarySections = []LibrarySection{
+	{"Playlists", "FEmusic_liked_playlists"},
+	{"Songs", "FEmusic_liked_videos"},
+	{"Albums", "FEmusic_liked_albums"},
+	{"Subscriptions", "FEmusic_library_corpus_artists"},
+}
+
+// LibrarySectionResult holds items and an optional continuation token.
+type LibrarySectionResult struct {
+	Items       []MusicItem
+	Continuation string
+}
+
+// GetLibrarySection fetches a single library section by browseID.
+func (c *MusicClient) GetLibrarySection(ctx context.Context, browseID string) (*LibrarySectionResult, error) {
+	raw, err := c.Browse(ctx, browseID)
+	if err != nil {
+		return nil, err
+	}
+	return parseLibrarySection(raw)
+}
+
+// GetLibraryContinuation fetches the next page of a library section.
+func (c *MusicClient) GetLibraryContinuation(ctx context.Context, continuation string) (*LibrarySectionResult, error) {
+	c.mu.Lock()
+	raw, err := c.it.Browse(ctx, nil, nil, &continuation)
+	c.mu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("library continuation: %w", err)
+	}
+	data, err := toGJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &LibrarySectionResult{}
+	// Continuation responses use appendContinuationItemsAction or musicShelfContinuation
+	data.Get("continuationContents.musicShelfContinuation.contents").ForEach(func(_, entry gjson.Result) bool {
+		mrlir := entry.Get("musicResponsiveListItemRenderer")
+		if mrlir.Exists() {
+			result.Items = append(result.Items, parseMusicListItem(mrlir))
+		}
+		return true
+	})
+	ct := data.Get("continuationContents.musicShelfContinuation.continuations.0.nextContinuationData.continuation").String()
+	if ct != "" {
+		result.Continuation = ct
+	}
+
+	// Grid continuation
+	data.Get("continuationContents.gridContinuation.items").ForEach(func(_, entry gjson.Result) bool {
+		mtrir := entry.Get("musicTwoRowItemRenderer")
+		if mtrir.Exists() {
+			item := parseMusicTwoRowItem(mtrir)
+			if item.BrowseID != "" || item.VideoID != "" {
+				result.Items = append(result.Items, item)
+			}
+		}
+		return true
+	})
+	ct2 := data.Get("continuationContents.gridContinuation.continuations.0.nextContinuationData.continuation").String()
+	if ct2 != "" {
+		result.Continuation = ct2
+	}
+
+	return result, nil
+}
+
+func parseLibrarySection(raw map[string]interface{}) (*LibrarySectionResult, error) {
+	data, err := toGJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &LibrarySectionResult{}
+	tabs := getMusicBrowseTabs(data)
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		sections := tab.Get("tabRenderer.content.sectionListRenderer.contents")
+		sections.ForEach(func(_, section gjson.Result) bool {
+			// Grid items (playlists, albums)
+			grid := section.Get("gridRenderer")
+			grid.Get("items").ForEach(func(_, entry gjson.Result) bool {
+				mtrir := entry.Get("musicTwoRowItemRenderer")
+				if mtrir.Exists() {
+					item := parseMusicTwoRowItem(mtrir)
+					if item.BrowseID == "" && item.VideoID == "" {
+						return true
+					}
+					result.Items = append(result.Items, item)
+				}
+				return true
+			})
+			ct := grid.Get("continuations.0.nextContinuationData.continuation").String()
+			if ct != "" {
+				result.Continuation = ct
+			}
+
+			// Shelf items (songs, artists)
+			shelf := section.Get("musicShelfRenderer")
+			shelf.Get("contents").ForEach(func(_, entry gjson.Result) bool {
+				mrlir := entry.Get("musicResponsiveListItemRenderer")
+				if mrlir.Exists() {
+					item := parseMusicListItem(mrlir)
+					// Skip UI-only items like "Shuffle all"
+					if item.BrowseID == "" && item.VideoID == "" {
+						return true
+					}
+					result.Items = append(result.Items, item)
+				}
+				return true
+			})
+			ct2 := shelf.Get("continuations.0.nextContinuationData.continuation").String()
+			if ct2 != "" {
+				result.Continuation = ct2
+			}
+			return true
+		})
+		return true
+	})
+
+	return result, nil
 }
 
 // GetArtist fetches an artist page.
@@ -63,10 +259,7 @@ func (c *MusicClient) GetArtist(ctx context.Context, browseID string) (*MusicArt
 	}
 
 	// Content sections
-	tabs := data.Get("contents.singleColumnBrowseResultsRenderer.tabs")
-	if !tabs.Exists() {
-		tabs = data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
-	}
+	tabs := getMusicBrowseTabs(data)
 	tabs.ForEach(func(_, tab gjson.Result) bool {
 		sections := tab.Get("tabRenderer.content.sectionListRenderer.contents")
 		sections.ForEach(func(_, section gjson.Result) bool {
@@ -149,7 +342,7 @@ func (c *MusicClient) GetAlbum(ctx context.Context, browseID string) (*MusicAlbu
 		page.Title = header.Get("title.runs.0.text").String()
 		header.Get("subtitle.runs").ForEach(func(_, run gjson.Result) bool {
 			text := run.Get("text").String()
-			if page.Artist == "" && text != "Album" && text != " • " && text != "EP" && text != "Single" {
+			if page.Artist == "" && text != "Album" && text != " • " && text != "EP" && text != "Single" && text != "Playlist" {
 				page.Artist = text
 			}
 			// Year is typically the last numeric part
@@ -160,13 +353,8 @@ func (c *MusicClient) GetAlbum(ctx context.Context, browseID string) (*MusicAlbu
 		})
 	}
 
-	// Tracks from secondaryContents
-	sections := data.Get("contents.twoColumnBrowseResultsRenderer.secondaryContents.sectionListRenderer.contents")
-	sections.ForEach(func(_, section gjson.Result) bool {
-		shelf := section.Get("musicShelfRenderer")
-		if !shelf.Exists() {
-			return true
-		}
+	// Helper to extract tracks from a shelf (musicShelfRenderer or musicPlaylistShelfRenderer)
+	parseShelf := func(shelf gjson.Result) {
 		shelf.Get("contents").ForEach(func(_, entry gjson.Result) bool {
 			mrlir := entry.Get("musicResponsiveListItemRenderer")
 			if !mrlir.Exists() {
@@ -180,19 +368,53 @@ func (c *MusicClient) GetAlbum(ctx context.Context, browseID string) (*MusicAlbu
 				page.PlaylistID = plid
 			}
 
-			// Duration from fixedColumns
 			dur := mrlir.Get("fixedColumns.0.musicResponsiveListItemFixedColumnRenderer.text.runs.0.text").String()
 
 			page.Tracks = append(page.Tracks, MusicItem{
-				Type:        MusicSong,
-				Title:       title,
-				VideoID:     vid,
-				Subtitle:    dur,
+				Type:    MusicSong,
+				Title:   title,
+				VideoID: vid,
+				Subtitle: dur,
 			})
 			return true
 		})
-		return false
+	}
+
+	// Try secondaryContents first (albums use this)
+	sections := data.Get("contents.twoColumnBrowseResultsRenderer.secondaryContents.sectionListRenderer.contents")
+	sections.ForEach(func(_, section gjson.Result) bool {
+		if shelf := section.Get("musicShelfRenderer"); shelf.Exists() {
+			parseShelf(shelf)
+			return false
+		}
+		if shelf := section.Get("musicPlaylistShelfRenderer"); shelf.Exists() {
+			parseShelf(shelf)
+			return false
+		}
+		return true
 	})
+
+	// Fallback: playlists may use singleColumnBrowseResultsRenderer with tabs
+	if len(page.Tracks) == 0 {
+		tabs := data.Get("contents.singleColumnBrowseResultsRenderer.tabs")
+		if !tabs.Exists() {
+			tabs = data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+		}
+		tabs.ForEach(func(_, tab gjson.Result) bool {
+			tab.Get("tabRenderer.content.sectionListRenderer.contents").ForEach(func(_, section gjson.Result) bool {
+				if shelf := section.Get("musicPlaylistShelfRenderer"); shelf.Exists() {
+					parseShelf(shelf)
+					return false
+				}
+				if shelf := section.Get("musicShelfRenderer"); shelf.Exists() {
+					parseShelf(shelf)
+					return false
+				}
+				return true
+			})
+			return len(page.Tracks) == 0
+		})
+	}
 
 	return page, nil
 }
@@ -241,7 +463,9 @@ func parseMusicTwoRowItem(mtrir gjson.Result) MusicItem {
 // BrowseMore fetches a "See all" page (e.g., all albums for an artist).
 // Returns the items from gridRenderer or musicShelfRenderer.
 func (c *MusicClient) BrowseMore(ctx context.Context, browseID, params string) ([]MusicItem, error) {
+	c.mu.Lock()
 	raw, err := c.it.Browse(ctx, &browseID, &params, nil)
+	c.mu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("music browse more: %w", err)
 	}
@@ -251,10 +475,7 @@ func (c *MusicClient) BrowseMore(ctx context.Context, browseID, params string) (
 	}
 
 	var items []MusicItem
-	tabs := data.Get("contents.singleColumnBrowseResultsRenderer.tabs")
-	if !tabs.Exists() {
-		tabs = data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
-	}
+	tabs := getMusicBrowseTabs(data)
 	tabs.ForEach(func(_, tab gjson.Result) bool {
 		sections := tab.Get("tabRenderer.content.sectionListRenderer.contents")
 		sections.ForEach(func(_, section gjson.Result) bool {
@@ -387,29 +608,42 @@ func parseMusicListItem(mrlir gjson.Result) MusicItem {
 	})
 	subtitle := strings.Join(subtitleParts, "")
 
-	// Detect type from first word of subtitle
+	// Get videoId (for playable items)
+	videoID := mrlir.Get("overlay.musicItemThumbnailOverlayRenderer.content.musicPlayButtonRenderer.playNavigationEndpoint.watchEndpoint.videoId").String()
+
+	// Get browseId (for browsable items) — check multiple locations
+	browseID := mrlir.Get("navigationEndpoint.browseEndpoint.browseId").String()
+	if browseID == "" {
+		// Library artists/subscriptions have browseId in the title run's navigation
+		browseID = cols.Get("0.musicResponsiveListItemFlexColumnRenderer.text.runs.0.navigationEndpoint.browseEndpoint.browseId").String()
+	}
+
+	// Detect type: try subtitle first word, then fall back to browseID-based detection
 	itemType := MusicSong
+	detected := false
 	if len(subtitleParts) > 0 {
 		first := strings.TrimSpace(subtitleParts[0])
 		switch first {
 		case "Album":
 			itemType = MusicAlbum
+			detected = true
 		case "Artist":
 			itemType = MusicArtist
+			detected = true
 		case "Playlist":
 			itemType = MusicPlaylist
+			detected = true
 		case "Video":
 			itemType = MusicVideo
+			detected = true
 		case "Song":
 			itemType = MusicSong
+			detected = true
 		}
 	}
-
-	// Get videoId (for playable items)
-	videoID := mrlir.Get("overlay.musicItemThumbnailOverlayRenderer.content.musicPlayButtonRenderer.playNavigationEndpoint.watchEndpoint.videoId").String()
-
-	// Get browseId (for browsable items)
-	browseID := mrlir.Get("navigationEndpoint.browseEndpoint.browseId").String()
+	if !detected {
+		itemType = detectMusicItemType(subtitle, browseID)
+	}
 
 	item := MusicItem{
 		Type:     itemType,
@@ -439,11 +673,21 @@ func detectMusicItemType(subtitle, browseID string) MusicItemType {
 	if strings.Contains(lower, "video") {
 		return MusicVideo
 	}
-	if strings.HasPrefix(browseID, "MPRE") {
+	if strings.HasPrefix(browseID, "UC") {
+		return MusicArtist
+	}
+	if strings.HasPrefix(browseID, "MPRE") || strings.HasPrefix(browseID, "OLAK") {
 		return MusicAlbum
 	}
-	if strings.HasPrefix(browseID, "VL") {
+	if strings.HasPrefix(browseID, "VL") || strings.HasPrefix(browseID, "PL") ||
+		strings.HasPrefix(browseID, "RDCLAK") || strings.HasPrefix(browseID, "RDEM") {
 		return MusicPlaylist
+	}
+	if strings.Contains(lower, "playlist") {
+		return MusicPlaylist
+	}
+	if strings.Contains(lower, "album") || strings.Contains(lower, "single") || lower == "ep" || strings.Contains(lower, "ep •") {
+		return MusicAlbum
 	}
 	return MusicSong
 }
