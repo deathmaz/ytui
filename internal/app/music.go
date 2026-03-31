@@ -13,19 +13,76 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/config"
+	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
 
-type musicView int
+type musicKeyMap struct{}
+
+func (k musicKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "play")),
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+		key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next section")),
+		key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "load all")),
+		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
+	}
+}
+
+func (k musicKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{k.ShortHelp()}
+}
+
+const maxMusicTabs = 6
+
+type musicTabKind int
 
 const (
-	musicViewSearch musicView = iota
+	musicTabArtist musicTabKind = iota
+	musicTabAlbum
 )
+
+type artistSubTab struct {
+	title string
+	list  list.Model
+}
+
+type musicTab struct {
+	kind         musicTabKind
+	title        string
+	browseID     string
+	// Artist page
+	artistPage   *youtube.MusicArtistPage
+	artistSubs   []artistSubTab
+	activeSubTab int
+	// Album page
+	albumPage    *youtube.MusicAlbumPage
+	albumList    list.Model
+	loaded       bool
+}
 
 type musicSearchResultMsg struct {
 	Result *youtube.MusicSearchResult
 	Err    error
+}
+
+type musicArtistLoadedMsg struct {
+	Artist *youtube.MusicArtistPage
+	Err    error
+}
+
+type musicAlbumLoadedMsg struct {
+	Album *youtube.MusicAlbumPage
+	Err   error
+}
+
+type musicMoreLoadedMsg struct {
+	SubTabIdx int
+	Items     []youtube.MusicItem
+	Err       error
 }
 
 // musicItem wraps a MusicItem for the list component.
@@ -39,21 +96,26 @@ func (m musicItem) Description() string { return m.item.Subtitle }
 
 // MusicModel is the root Bubble Tea model for music mode.
 type MusicModel struct {
-	activeView musicView
-	width      int
-	height     int
-	keys       KeyMap
-	help       help.Model
-	client     *youtube.MusicClient
-	cfg        *config.Config
+	onSearch     bool // true = search view active, false = a music tab is active
+	width        int
+	height       int
+	keys         KeyMap
+	help         help.Model
+	client       *youtube.MusicClient
+	cfg          *config.Config
 
 	// Search
-	searchInput    textinput.Model
-	searchResults  list.Model
-	searchSpinner  spinner.Model
-	searching      bool
-	searchFocused  bool // true = input focused, false = list focused
-	query          string
+	searchInput   textinput.Model
+	searchResults list.Model
+	searchSpinner spinner.Model
+	searching     bool
+	searchFocused bool
+	query         string
+
+	// Dynamic tabs
+	tabs         []musicTab
+	activeTabIdx int
+	pageLoading  bool
 
 	statusMsg string
 	statusSeq int
@@ -71,18 +133,10 @@ func NewMusic(client *youtube.MusicClient, cfg *config.Config, opts Options) *Mu
 
 	sp := styles.NewSpinner()
 
-	l := list.New(nil, musicDelegate{}, 0, 0)
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetShowHelp(false)
-	l.SetFilteringEnabled(false)
-	l.SetShowPagination(true)
-	l.KeyMap.Quit = key.NewBinding()
-	l.KeyMap.GoToStart = key.NewBinding(key.WithKeys("g", "home"))
-	l.KeyMap.GoToEnd = key.NewBinding(key.WithKeys("G", "end"))
+	l := shared.NewList(musicDelegate{})
 
 	m := &MusicModel{
-		activeView:    musicViewSearch,
+		onSearch:      true,
 		keys:          DefaultKeyMap(),
 		help:          h,
 		client:        client,
@@ -152,23 +206,86 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// List focused
+		// Global keys (not in search input)
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
-		case key.Matches(msg, m.keys.Search), msg.String() == "/":
-			m.searchFocused = true
-			m.searchInput.Focus()
-			return m, textinput.Blink
-		case key.Matches(msg, m.keys.Play):
-			return m, m.playSelected()
 		case key.Matches(msg, m.keys.Help):
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
-		default:
+		case key.Matches(msg, m.keys.Back):
+			if !m.onSearch {
+				// Close current tab
+				m.closeActiveTab()
+				return m, nil
+			}
+		case key.Matches(msg, m.keys.Play):
+			return m, m.playSelected()
+		case key.Matches(msg, m.keys.Search), msg.String() == "/":
+			m.onSearch = true
+			m.searchFocused = true
+			m.searchInput.Focus()
+			return m, textinput.Blink
+		case msg.String() == "enter":
+			return m, m.openSelected()
+		}
+
+		// Tab number keys: 1 = search, 2+ = dynamic tabs
+		if k := msg.String(); len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
+			idx := int(k[0] - '1')
+			if idx == 0 {
+				m.onSearch = true
+				return m, nil
+			}
+			tabIdx := idx - 1
+			if tabIdx < len(m.tabs) {
+				m.onSearch = false
+				m.activeTabIdx = tabIdx
+				return m, nil
+			}
+		}
+
+		// Sub-tab navigation for artist pages
+		if !m.onSearch {
+			if tab := m.activeTab(); tab != nil && tab.kind == musicTabArtist && tab.loaded {
+				if msg.String() == "tab" {
+					if tab.activeSubTab < len(tab.artistSubs)-1 {
+						tab.activeSubTab++
+						m.resizeViews()
+					}
+					return m, nil
+				}
+				if msg.String() == "shift+tab" {
+					if tab.activeSubTab > 0 {
+						tab.activeSubTab--
+						m.resizeViews()
+					}
+					return m, nil
+				}
+				if msg.String() == "L" {
+					return m, m.loadMoreForSubTab(tab)
+				}
+			}
+		}
+
+		// Delegate to active list
+		if m.onSearch {
 			var cmd tea.Cmd
 			m.searchResults, cmd = m.searchResults.Update(msg)
 			cmds = append(cmds, cmd)
+		} else if tab := m.activeTab(); tab != nil {
+			switch tab.kind {
+			case musicTabArtist:
+				if tab.loaded && tab.activeSubTab < len(tab.artistSubs) {
+					var cmd tea.Cmd
+					tab.artistSubs[tab.activeSubTab].list, cmd = tab.artistSubs[tab.activeSubTab].list.Update(msg)
+					cmds = append(cmds, cmd)
+				}
+			case musicTabAlbum:
+				var cmd tea.Cmd
+				tab.albumList, cmd = tab.albumList.Update(msg)
+				cmds = append(cmds, cmd)
+			}
 		}
 
 	case musicSearchResultMsg:
@@ -187,6 +304,57 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmd := m.searchResults.SetItems(items)
 		cmds = append(cmds, cmd)
+
+	case musicArtistLoadedMsg:
+		m.pageLoading = false
+		if msg.Err != nil {
+			return m, m.setStatus("Error: "+msg.Err.Error(), 5*time.Second)
+		}
+		if tab := m.activeTab(); tab != nil && tab.kind == musicTabArtist && !tab.loaded {
+			tab.artistPage = msg.Artist
+			tab.artistSubs = m.buildArtistSubTabs(msg.Artist)
+			tab.loaded = true
+			m.resizeViews()
+		}
+		return m, nil
+
+	case musicAlbumLoadedMsg:
+		m.pageLoading = false
+		if msg.Err != nil {
+			return m, m.setStatus("Error: "+msg.Err.Error(), 5*time.Second)
+		}
+		if tab := m.activeTab(); tab != nil && tab.kind == musicTabAlbum && !tab.loaded {
+			tab.albumPage = msg.Album
+			tab.albumList = m.buildAlbumList(msg.Album)
+			tab.loaded = true
+			m.resizeViews()
+		}
+		return m, nil
+
+	case musicMoreLoadedMsg:
+		m.statusMsg = ""
+		if msg.Err != nil {
+			return m, m.setStatus("Error loading more: "+msg.Err.Error(), 5*time.Second)
+		}
+		if tab := m.activeTab(); tab != nil && tab.kind == musicTabArtist {
+			if msg.SubTabIdx < len(tab.artistSubs) {
+				sub := &tab.artistSubs[msg.SubTabIdx]
+				var items []list.Item
+				for _, it := range msg.Items {
+					items = append(items, musicItem{item: it})
+				}
+				sub.list.SetItems(items)
+				// Clear the more endpoint since we loaded all
+				for i := range tab.artistPage.Shelves {
+					if tab.artistPage.Shelves[i].Title == sub.title {
+						tab.artistPage.Shelves[i].MoreBrowseID = ""
+						tab.artistPage.Shelves[i].MoreParams = ""
+						break
+					}
+				}
+			}
+		}
+		return m, nil
 
 	case musicPlayReadyMsg:
 		if msg.err != nil {
@@ -224,7 +392,7 @@ func (m *MusicModel) View() string {
 		statusLine = styles.Accent.Render(m.statusMsg)
 	}
 
-	helpView := statusBarStyle.Render(m.help.View(m.keys))
+	helpView := statusBarStyle.Render(m.help.View(musicKeyMap{}))
 
 	var sections []string
 	sections = append(sections, tabs, content)
@@ -236,14 +404,211 @@ func (m *MusicModel) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
+func (m *MusicModel) loadMoreForSubTab(tab *musicTab) tea.Cmd {
+	if tab.activeSubTab >= len(tab.artistSubs) || tab.artistPage == nil {
+		return nil
+	}
+	sub := tab.artistSubs[tab.activeSubTab]
+	// Find the matching shelf to get the more endpoint
+	var shelf *youtube.MusicShelf
+	for i := range tab.artistPage.Shelves {
+		if tab.artistPage.Shelves[i].Title == sub.title {
+			shelf = &tab.artistPage.Shelves[i]
+			break
+		}
+	}
+	if shelf == nil || shelf.MoreBrowseID == "" {
+		return m.setStatus("All items loaded", 2*time.Second)
+	}
+
+	browseID := shelf.MoreBrowseID
+	params := shelf.MoreParams
+	subIdx := tab.activeSubTab
+	client := m.client
+	return tea.Batch(
+		m.setStatus("Loading all "+sub.title+"...", 10*time.Second),
+		func() tea.Msg {
+			items, err := client.BrowseMore(context.Background(), browseID, params)
+			return musicMoreLoadedMsg{SubTabIdx: subIdx, Items: items, Err: err}
+		},
+	)
+}
+
+func (m *MusicModel) activeTab() *musicTab {
+	if m.onSearch || m.activeTabIdx >= len(m.tabs) {
+		return nil
+	}
+	return &m.tabs[m.activeTabIdx]
+}
+
+func (m *MusicModel) closeActiveTab() {
+	if m.onSearch || len(m.tabs) == 0 {
+		return
+	}
+	m.tabs = append(m.tabs[:m.activeTabIdx], m.tabs[m.activeTabIdx+1:]...)
+	if len(m.tabs) == 0 {
+		m.onSearch = true
+	} else if m.activeTabIdx >= len(m.tabs) {
+		m.activeTabIdx = len(m.tabs) - 1
+	}
+}
+
+func (m *MusicModel) openSelected() tea.Cmd {
+	it := m.selectedMusicItem()
+	if it == nil {
+		return nil
+	}
+	// Album tracks: Enter plays
+	if !m.onSearch {
+		if tab := m.activeTab(); tab != nil && tab.kind == musicTabAlbum {
+			return m.playSelected()
+		}
+	}
+	return m.openMusicItem(*it)
+}
+
+func (m *MusicModel) openMusicItem(it youtube.MusicItem) tea.Cmd {
+	switch it.Type {
+	case youtube.MusicArtist:
+		if it.BrowseID == "" {
+			return nil
+		}
+		return m.openTab(musicTabArtist, it.Title, it.BrowseID)
+	case youtube.MusicAlbum:
+		if it.BrowseID == "" {
+			return nil
+		}
+		return m.openTab(musicTabAlbum, it.Title, it.BrowseID)
+	case youtube.MusicSong, youtube.MusicVideo:
+		if it.VideoID != "" {
+			return playVideoCmd(youtube.VideoURL(it.VideoID), m.cfg.Player.Quality, m.cfg.Player.Command, m.cfg.Player.Args)
+		}
+	case youtube.MusicPlaylist:
+		if it.BrowseID != "" {
+			return m.openTab(musicTabAlbum, it.Title, it.BrowseID)
+		}
+	}
+	return nil
+}
+
+func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd {
+	// Check if already open
+	for i, tab := range m.tabs {
+		if tab.browseID == browseID {
+			m.onSearch = false
+			m.activeTabIdx = i
+			return nil
+		}
+	}
+	if len(m.tabs) >= maxMusicTabs {
+		return m.setStatus("Max tabs reached (close one with Esc)", 3*time.Second)
+	}
+
+	m.tabs = append(m.tabs, musicTab{
+		kind:     kind,
+		title:    title,
+		browseID: browseID,
+	})
+	m.activeTabIdx = len(m.tabs) - 1
+	m.onSearch = false
+	m.pageLoading = true
+
+	client := m.client
+	switch kind {
+	case musicTabArtist:
+		return tea.Batch(m.searchSpinner.Tick, func() tea.Msg {
+			artist, err := client.GetArtist(context.Background(), browseID)
+			return musicArtistLoadedMsg{Artist: artist, Err: err}
+		})
+	case musicTabAlbum:
+		return tea.Batch(m.searchSpinner.Tick, func() tea.Msg {
+			album, err := client.GetAlbum(context.Background(), browseID)
+			return musicAlbumLoadedMsg{Album: album, Err: err}
+		})
+	}
+	return nil
+}
+
+func (m *MusicModel) buildArtistSubTabs(artist *youtube.MusicArtistPage) []artistSubTab {
+	var subs []artistSubTab
+	for _, shelf := range artist.Shelves {
+		if len(shelf.Items) == 0 {
+			continue
+		}
+		l := shared.NewList(musicDelegate{})
+		var items []list.Item
+		for _, it := range shelf.Items {
+			items = append(items, musicItem{item: it})
+		}
+		l.SetItems(items)
+		subs = append(subs, artistSubTab{title: shelf.Title, list: l})
+	}
+	return subs
+}
+
+func (m *MusicModel) buildAlbumList(album *youtube.MusicAlbumPage) list.Model {
+	l := shared.NewList(musicTrackDelegate{})
+	var items []list.Item
+	for i, track := range album.Tracks {
+		track.Subtitle = fmt.Sprintf("%d. %s", i+1, track.Subtitle)
+		items = append(items, musicItem{item: track})
+	}
+	l.SetItems(items)
+	return l
+}
+
 func (m *MusicModel) renderTabs() string {
-	label := "[3] Search"
-	rendered := activeTabStyle.Render(label)
-	bar := lipgloss.JoinHorizontal(lipgloss.Top, rendered)
+	var rendered []string
+
+	// Fixed search tab
+	style := tabStyle
+	if m.onSearch {
+		style = activeTabStyle
+	}
+	rendered = append(rendered, style.Render("[1] Search"))
+
+	// Dynamic tabs
+	for i, tab := range m.tabs {
+		icon := "♫"
+		if tab.kind == musicTabAlbum {
+			icon = "◉"
+		}
+		label := fmt.Sprintf("[%d] %s", i+2, shared.Truncate(icon+" "+tab.title, 22))
+		style := tabStyle
+		if !m.onSearch && m.activeTabIdx == i {
+			style = activeTabStyle
+		}
+		rendered = append(rendered, style.Render(label))
+	}
+
+	bar := lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 	return tabSeparatorStyle.Width(m.width).Render(bar)
 }
 
 func (m *MusicModel) renderContent() string {
+	if m.pageLoading {
+		return m.searchSpinner.View() + " Loading..."
+	}
+
+	if m.onSearch {
+		return m.renderSearch()
+	}
+
+	if tab := m.activeTab(); tab != nil {
+		if !tab.loaded {
+			return m.searchSpinner.View() + " Loading..."
+		}
+		switch tab.kind {
+		case musicTabArtist:
+			return m.renderArtistPage(tab)
+		case musicTabAlbum:
+			return m.renderAlbumPage(tab)
+		}
+	}
+	return ""
+}
+
+func (m *MusicModel) renderSearch() string {
 	inputView := lipgloss.NewStyle().Padding(0, 1).Width(m.width).Render(m.searchInput.View())
 
 	if m.searching {
@@ -259,19 +624,103 @@ func (m *MusicModel) renderContent() string {
 	)
 }
 
-func (m *MusicModel) resizeViews() {
+var (
+	subTabStyle       = lipgloss.NewStyle().Padding(0, 1).Foreground(styles.DimGray)
+	activeSubTabStyle = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(styles.Cyan)
+)
+
+func (m *MusicModel) renderArtistPage(tab *musicTab) string {
+	if len(tab.artistSubs) == 0 {
+		return styles.Dim.Render("No content")
+	}
+
+	// Sub-tab bar
+	var tabLabels []string
+	for i, sub := range tab.artistSubs {
+		style := subTabStyle
+		if i == tab.activeSubTab {
+			style = activeSubTabStyle
+		}
+		tabLabels = append(tabLabels, style.Render(sub.title))
+	}
+	subBar := lipgloss.JoinHorizontal(lipgloss.Top, tabLabels...)
+
+	// Check if more items are available
+	var hint string
+	if tab.artistPage != nil && tab.activeSubTab < len(tab.artistSubs) {
+		subTitle := tab.artistSubs[tab.activeSubTab].title
+		for _, shelf := range tab.artistPage.Shelves {
+			if shelf.Title == subTitle && shelf.MoreBrowseID != "" {
+				hint = styles.Dim.Render("  Press L to load all " + subTitle)
+				break
+			}
+		}
+	}
+
+	// Measure overhead and resize list to fit exactly
+	overhead := lipgloss.Height(subBar)
+	if hint != "" {
+		overhead += lipgloss.Height(hint)
+	}
+	ch := m.contentHeight()
+	if tab.activeSubTab < len(tab.artistSubs) {
+		tab.artistSubs[tab.activeSubTab].list.SetSize(m.width, ch-overhead)
+	}
+
+	activeList := ""
+	if tab.activeSubTab < len(tab.artistSubs) {
+		activeList = tab.artistSubs[tab.activeSubTab].list.View()
+	}
+
+	var sections []string
+	sections = append(sections, subBar, activeList)
+	if hint != "" {
+		sections = append(sections, hint)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+func (m *MusicModel) renderAlbumPage(tab *musicTab) string {
+	if tab.albumPage == nil {
+		return ""
+	}
+	header := styles.Title.Render(tab.albumPage.Title)
+	if tab.albumPage.Artist != "" {
+		header += "  " + styles.Subtitle.Render(tab.albumPage.Artist)
+	}
+	if tab.albumPage.Year != "" {
+		header += "  " + styles.Dim.Render(tab.albumPage.Year)
+	}
+
+	ch := m.contentHeight()
+	tab.albumList.SetSize(m.width, ch-lipgloss.Height(header))
+	return lipgloss.JoinVertical(lipgloss.Left, header, tab.albumList.View())
+}
+
+func (m *MusicModel) contentHeight() int {
 	tabs := m.renderTabs()
-	helpView := statusBarStyle.Render(m.help.View(m.keys))
+	helpView := statusBarStyle.Render(m.help.View(musicKeyMap{}))
 	overhead := lipgloss.Height(tabs) + lipgloss.Height(helpView)
 	if m.statusMsg != "" {
 		overhead++
 	}
-	ch := m.height - overhead
+	h := m.height - overhead
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
 
+func (m *MusicModel) resizeViews() {
+	if m.width == 0 {
+		return
+	}
+	ch := m.contentHeight()
 	inputView := lipgloss.NewStyle().Padding(0, 1).Width(m.width).Render(m.searchInput.View())
 	inputHeight := lipgloss.Height(inputView)
 	m.searchResults.SetSize(m.width, ch-inputHeight)
 	m.searchInput.Width = m.width - 4
+	// Artist/album lists are sized dynamically during rendering
 }
 
 func (m *MusicModel) searchCmd(query string) tea.Cmd {
@@ -287,12 +736,32 @@ type musicPlayReadyMsg struct {
 	err error
 }
 
+func (m *MusicModel) selectedMusicItem() *youtube.MusicItem {
+	var sel list.Item
+	if m.onSearch {
+		sel = m.searchResults.SelectedItem()
+	} else if tab := m.activeTab(); tab != nil {
+		switch tab.kind {
+		case musicTabArtist:
+			if tab.loaded && tab.activeSubTab < len(tab.artistSubs) {
+				sel = tab.artistSubs[tab.activeSubTab].list.SelectedItem()
+			}
+		case musicTabAlbum:
+			sel = tab.albumList.SelectedItem()
+		}
+	}
+	if mi, ok := sel.(musicItem); ok {
+		return &mi.item
+	}
+	return nil
+}
+
 func (m *MusicModel) playSelected() tea.Cmd {
-	item, ok := m.searchResults.SelectedItem().(musicItem)
-	if !ok {
+	ptr := m.selectedMusicItem()
+	if ptr == nil {
 		return nil
 	}
-	it := item.item
+	it := *ptr
 
 	// Songs/videos have direct videoID
 	if it.VideoID != "" {

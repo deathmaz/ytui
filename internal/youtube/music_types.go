@@ -23,8 +23,10 @@ const (
 
 // MusicShelf is a named section of music items (e.g., "Top songs", "Albums").
 type MusicShelf struct {
-	Title string
-	Items []MusicItem
+	Title       string
+	Items       []MusicItem
+	MoreBrowseID string // browseId for "See all" / load more
+	MoreParams   string // params for the browse call
 }
 
 // MusicSearchResult holds the results of a YouTube Music search.
@@ -32,3 +34,19 @@ type MusicSearchResult struct {
 	TopResult *MusicItem    // from musicCardShelfRenderer (artist/album card)
 	Shelves   []MusicShelf  // from musicShelfRenderer sections
 }
+
+// MusicArtistPage holds data for an artist page.
+type MusicArtistPage struct {
+	Name     string
+	Shelves  []MusicShelf // top songs, albums, singles, videos, etc.
+}
+
+// MusicAlbumPage holds data for an album page.
+type MusicAlbumPage struct {
+	Title      string
+	Artist     string
+	Year       string
+	Tracks     []MusicItem
+	PlaylistID string
+}
+

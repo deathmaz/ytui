@@ -45,6 +45,32 @@ func (d musicDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	fmt.Fprintf(w, "%s%s\n%s  %s", cursor, title, "  ", meta)
 }
 
+// musicTrackDelegate renders album tracks (compact, one line per track).
+type musicTrackDelegate struct{}
+
+func (d musicTrackDelegate) Height() int                             { return 1 }
+func (d musicTrackDelegate) Spacing() int                            { return 0 }
+func (d musicTrackDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+
+func (d musicTrackDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	mi, ok := item.(musicItem)
+	if !ok {
+		return
+	}
+	isSelected := index == m.Index()
+	cursor := "  "
+	if isSelected {
+		cursor = "> "
+	}
+	titleStyle := styles.Title
+	if isSelected {
+		titleStyle = styles.SelectedTitle
+	}
+	title := titleStyle.Render(shared.Truncate(mi.item.Title, m.Width()-20))
+	dur := styles.Dim.Render(mi.item.Subtitle)
+	fmt.Fprintf(w, "%s♪ %s  %s", cursor, title, dur)
+}
+
 func typeIcon(t youtube.MusicItemType) string {
 	switch t {
 	case youtube.MusicSong:
