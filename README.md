@@ -1,9 +1,10 @@
 # ytui
 
-A terminal-based YouTube client built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea). Browse subscriptions, search videos, watch with mpv, download with yt-dlp, view comments, and see thumbnails rendered in your terminal.
+A terminal-based YouTube client built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea). Browse subscriptions, search videos, watch with mpv, download with yt-dlp, view comments, and see thumbnails rendered in your terminal. Includes a YouTube Music mode for browsing and playing music.
 
 ## Features
 
+### Video Mode
 - **Search** YouTube videos with infinite scroll
 - **Subscription feed** and **channel list** (requires authentication)
 - **Video details** with views, likes, description, and thumbnail
@@ -12,6 +13,16 @@ A terminal-based YouTube client built with Go and [Bubble Tea](https://github.co
 - **Download** videos with yt-dlp
 - **Thumbnails** rendered in terminal via Kitty graphics protocol
 - **Vim-like keybindings** throughout
+
+### Music Mode
+- **Search** YouTube Music (songs, albums, artists, playlists)
+- **Home feed** with personalized shelves (requires authentication)
+- **Library** with sub-tabs: Playlists, Songs, Albums, Subscriptions (requires authentication)
+- **Artist pages** with sub-tabs for songs, albums, singles, videos
+- **Album/playlist pages** with track listings
+- **Play** songs and albums with mpv
+- **"See all" / Load more** for artist sections and library pagination
+- **Multi-tab** interface — open multiple artists/albums simultaneously
 
 ## Requirements
 
@@ -45,6 +56,8 @@ ytui -music -search "metallica"  # music mode with search
 
 ## Keybindings
 
+### Video Mode Keybindings
+
 | Key | Action |
 |-----|--------|
 | `1` / `2` / `3` | Switch to Feed / Subs / Search |
@@ -68,6 +81,23 @@ ytui -music -search "metallica"  # music mode with search
 | `?` | Toggle help |
 | `q` | Quit |
 | `Ctrl+c` | Force quit |
+
+### Music Mode Keybindings
+
+| Key | Action |
+|-----|--------|
+| `1` / `2` / `3` | Switch to Home / Library / Search |
+| `4`-`9` | Switch to open artist/album tabs |
+| `j` / `k` | Navigate down / up |
+| `g` / `G` | Top / bottom |
+| `/` | Focus search input |
+| `Tab` / `Shift+Tab` | Next / previous sub-tab (shelves, sections) |
+| `Enter` | Open item (artist/album/playlist) or play song |
+| `p` | Play selected item |
+| `L` | Load more (artist sections, library pagination) |
+| `a` | Authenticate (extract browser cookies) |
+| `Esc` | Close current tab / blur input |
+| `q` | Quit |
 
 ## Configuration
 
