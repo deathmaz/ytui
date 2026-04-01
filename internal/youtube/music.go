@@ -392,14 +392,7 @@ func (c *MusicClient) GetAlbum(ctx context.Context, browseID string) (*MusicAlbu
 		if !thumbPath.Exists() {
 			thumbPath = header.Get("thumbnail.thumbnails")
 		}
-		thumbPath.ForEach(func(_, t gjson.Result) bool {
-			page.Thumbnails = append(page.Thumbnails, Thumbnail{
-				URL:    t.Get("url").String(),
-				Width:  int(t.Get("width").Int()),
-				Height: int(t.Get("height").Int()),
-			})
-			return true
-		})
+		page.Thumbnails = parseThumbnails(thumbPath)
 	}
 
 	// Helper to extract tracks from a shelf (musicShelfRenderer or musicPlaylistShelfRenderer)
@@ -497,14 +490,7 @@ func parseMusicTwoRowItem(mtrir gjson.Result) MusicItem {
 		VideoID:  videoID,
 	}
 
-	mtrir.Get("thumbnailRenderer.musicThumbnailRenderer.thumbnail.thumbnails").ForEach(func(_, t gjson.Result) bool {
-		item.Thumbnails = append(item.Thumbnails, Thumbnail{
-			URL:    t.Get("url").String(),
-			Width:  int(t.Get("width").Int()),
-			Height: int(t.Get("height").Int()),
-		})
-		return true
-	})
+	item.Thumbnails = parseThumbnails(mtrir.Get("thumbnailRenderer.musicThumbnailRenderer.thumbnail.thumbnails"))
 
 	return item
 }
@@ -631,14 +617,7 @@ func parseMusicCard(card gjson.Result) MusicItem {
 		BrowseID: browseID,
 	}
 
-	card.Get("thumbnail.musicThumbnailRenderer.thumbnail.thumbnails").ForEach(func(_, t gjson.Result) bool {
-		item.Thumbnails = append(item.Thumbnails, Thumbnail{
-			URL:    t.Get("url").String(),
-			Width:  int(t.Get("width").Int()),
-			Height: int(t.Get("height").Int()),
-		})
-		return true
-	})
+	item.Thumbnails = parseThumbnails(card.Get("thumbnail.musicThumbnailRenderer.thumbnail.thumbnails"))
 
 	return item
 }
@@ -702,16 +681,22 @@ func parseMusicListItem(mrlir gjson.Result) MusicItem {
 		BrowseID: browseID,
 	}
 
-	mrlir.Get("thumbnail.musicThumbnailRenderer.thumbnail.thumbnails").ForEach(func(_, t gjson.Result) bool {
-		item.Thumbnails = append(item.Thumbnails, Thumbnail{
+	item.Thumbnails = parseThumbnails(mrlir.Get("thumbnail.musicThumbnailRenderer.thumbnail.thumbnails"))
+
+	return item
+}
+
+func parseThumbnails(arr gjson.Result) []Thumbnail {
+	var thumbs []Thumbnail
+	arr.ForEach(func(_, t gjson.Result) bool {
+		thumbs = append(thumbs, Thumbnail{
 			URL:    t.Get("url").String(),
 			Width:  int(t.Get("width").Int()),
 			Height: int(t.Get("height").Int()),
 		})
 		return true
 	})
-
-	return item
+	return thumbs
 }
 
 func detectMusicItemType(subtitle, browseID string) MusicItemType {
