@@ -617,7 +617,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case spinner.TickMsg:
-		if m.searching {
+		if m.searching || m.homeLoading || m.libraryLoading || m.pageLoading {
 			var cmd tea.Cmd
 			m.searchSpinner, cmd = m.searchSpinner.Update(msg)
 			cmds = append(cmds, cmd)
