@@ -734,9 +734,7 @@ func (m *MusicModel) openMusicItem(it youtube.MusicItem) tea.Cmd {
 		}
 		return m.openTab(musicTabAlbum, it.Title, it.BrowseID)
 	case youtube.MusicSong, youtube.MusicVideo:
-		if it.VideoID != "" {
-			return playVideoCmd(youtube.VideoURL(it.VideoID), "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
-		}
+		return m.playItem(it)
 	case youtube.MusicPlaylist:
 		if it.BrowseID != "" {
 			return m.openTab(musicTabAlbum, it.Title, it.BrowseID)
@@ -1096,8 +1094,11 @@ func (m *MusicModel) playSelected() tea.Cmd {
 	if ptr == nil {
 		return nil
 	}
-	it := *ptr
+	return m.playItem(*ptr)
+}
 
+// playItem is the single play entry point for all music items.
+func (m *MusicModel) playItem(it youtube.MusicItem) tea.Cmd {
 	// Albums/playlists: browse to get the full playlist URL
 	if it.BrowseID != "" && (it.Type == youtube.MusicAlbum || it.Type == youtube.MusicPlaylist) {
 		browseID := it.BrowseID
