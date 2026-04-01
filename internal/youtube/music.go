@@ -666,13 +666,7 @@ func parseMusicListItem(mrlir gjson.Result) MusicItem {
 }
 
 func detectMusicItemType(subtitle, browseID string) MusicItemType {
-	lower := strings.ToLower(subtitle)
-	if strings.Contains(lower, "artist") {
-		return MusicArtist
-	}
-	if strings.Contains(lower, "video") {
-		return MusicVideo
-	}
+	// Check browseID prefix first (most reliable)
 	if strings.HasPrefix(browseID, "UC") {
 		return MusicArtist
 	}
@@ -683,11 +677,25 @@ func detectMusicItemType(subtitle, browseID string) MusicItemType {
 		strings.HasPrefix(browseID, "RDCLAK") || strings.HasPrefix(browseID, "RDEM") {
 		return MusicPlaylist
 	}
-	if strings.Contains(lower, "playlist") {
-		return MusicPlaylist
+
+	// Check the first word of the subtitle (before " • ")
+	first := strings.ToLower(subtitle)
+	if i := strings.Index(first, " • "); i >= 0 {
+		first = first[:i]
 	}
-	if strings.Contains(lower, "album") || strings.Contains(lower, "single") || lower == "ep" || strings.Contains(lower, "ep •") {
+	first = strings.TrimSpace(first)
+	switch first {
+	case "artist":
+		return MusicArtist
+	case "video":
+		return MusicVideo
+	case "playlist":
+		return MusicPlaylist
+	case "album", "single":
+		return MusicAlbum
+	case "ep":
 		return MusicAlbum
 	}
+
 	return MusicSong
 }

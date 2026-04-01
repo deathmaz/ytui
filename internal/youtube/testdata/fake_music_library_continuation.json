@@ -1,0 +1,32 @@
+{
+  "continuationContents": {
+    "gridContinuation": {
+      "items": [
+        {
+          "musicTwoRowItemRenderer": {
+            "title": { "runs": [{ "text": "Continued Playlist" }] },
+            "subtitle": {
+              "runs": [
+                { "text": "Playlist" },
+                { "text": " • " },
+                { "text": "Auto" }
+              ]
+            },
+            "navigationEndpoint": {
+              "browseEndpoint": {
+                "browseId": "VLfake_cont_pl_001"
+              }
+            }
+          }
+        }
+      ],
+      "continuations": [
+        {
+          "nextContinuationData": {
+            "continuation": "fake_next_grid_continuation"
+          }
+        }
+      ]
+    }
+  }
+}
