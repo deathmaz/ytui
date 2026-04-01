@@ -1098,14 +1098,8 @@ func (m *MusicModel) playSelected() tea.Cmd {
 	}
 	it := *ptr
 
-	// Songs/videos have direct videoID
-	if it.VideoID != "" {
-		url := youtube.VideoURL(it.VideoID)
-		return playVideoCmd(url, "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
-	}
-
-	// Albums/playlists need browsing to get a playable URL
-	if it.BrowseID != "" {
+	// Albums/playlists: browse to get the full playlist URL
+	if it.BrowseID != "" && (it.Type == youtube.MusicAlbum || it.Type == youtube.MusicPlaylist) {
 		browseID := it.BrowseID
 		client := m.client
 		return tea.Batch(
@@ -1116,8 +1110,7 @@ func (m *MusicModel) playSelected() tea.Cmd {
 					return musicPlayReadyMsg{err: err}
 				}
 				if playlistID != "" {
-					// Play the whole album/playlist via playlist URL
-					return musicPlayReadyMsg{url: youtube.PlaylistURL(playlistID)}
+					return musicPlayReadyMsg{url: youtube.MusicPlaylistURL(playlistID)}
 				}
 				if len(tracks) > 0 && tracks[0].VideoID != "" {
 					return musicPlayReadyMsg{url: youtube.VideoURL(tracks[0].VideoID)}
@@ -1125,6 +1118,11 @@ func (m *MusicModel) playSelected() tea.Cmd {
 				return musicPlayReadyMsg{err: fmt.Errorf("no playable tracks found")}
 			},
 		)
+	}
+
+	// Songs/videos: play directly
+	if it.VideoID != "" {
+		return playVideoCmd(youtube.VideoURL(it.VideoID), "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
 	}
 
 	return m.setStatus("Cannot play this item", 3*time.Second)

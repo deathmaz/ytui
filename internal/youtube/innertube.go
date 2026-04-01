@@ -23,6 +23,11 @@ func PlaylistURL(id string) string {
 	return "https://www.youtube.com/playlist?list=" + id
 }
 
+// MusicPlaylistURL returns a YouTube Music playlist URL for a playlist ID.
+func MusicPlaylistURL(id string) string {
+	return "https://music.youtube.com/playlist?list=" + id
+}
+
 // InnerTubeClient implements Client using YouTube's InnerTube API.
 type InnerTubeClient struct {
 	it            *innertubego.InnerTube
