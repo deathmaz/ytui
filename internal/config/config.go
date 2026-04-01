@@ -21,11 +21,39 @@ type GeneralConfig struct {
 	Mode string `toml:"mode"` // "video" (default) or "music"
 }
 
-// PlayerConfig configures the video player.
+// PlayerConfig configures playback for video and music modes.
 type PlayerConfig struct {
+	Video VideoPlayerConfig `toml:"video"`
+	Music MusicPlayerConfig `toml:"music"`
+}
+
+// VideoPlayerConfig configures the player for video mode.
+type VideoPlayerConfig struct {
 	Command string   `toml:"command"`
 	Args    []string `toml:"args"`
 	Quality string   `toml:"quality"` // default quality (e.g., "1080", "720", "best", "audio")
+}
+
+// MusicPlayerConfig configures the player for music mode.
+type MusicPlayerConfig struct {
+	Command string   `toml:"command"` // defaults to player.video.command if empty
+	Args    []string `toml:"args"`    // defaults to player.video.args if empty
+}
+
+// EffectiveCommand returns the music command if set, otherwise the video command.
+func (p PlayerConfig) EffectiveCommand(music bool) string {
+	if music && p.Music.Command != "" {
+		return p.Music.Command
+	}
+	return p.Video.Command
+}
+
+// EffectiveArgs returns the music args if set, otherwise the video args.
+func (p PlayerConfig) EffectiveArgs(music bool) []string {
+	if music && len(p.Music.Args) > 0 {
+		return p.Music.Args
+	}
+	return p.Video.Args
 }
 
 // DownloadConfig configures video downloads.
@@ -48,8 +76,10 @@ func Default() *Config {
 			Mode: "video",
 		},
 		Player: PlayerConfig{
-			Command: "mpv",
-			Args:    []string{"--no-terminal"},
+			Video: VideoPlayerConfig{
+				Command: "mpv",
+				Args:    []string{"--no-terminal"},
+			},
 		},
 		Download: DownloadConfig{
 			Command:   "yt-dlp",

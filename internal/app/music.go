@@ -515,7 +515,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, m.setStatus("Play error: "+msg.err.Error(), 5*time.Second)
 		}
-		return m, playVideoCmd(msg.url, m.cfg.Player.Quality, m.cfg.Player.Command, m.cfg.Player.Args)
+		return m, playVideoCmd(msg.url, "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
 
 	case musicAuthSuccessMsg:
 		m.authenticating = false
@@ -735,7 +735,7 @@ func (m *MusicModel) openMusicItem(it youtube.MusicItem) tea.Cmd {
 		return m.openTab(musicTabAlbum, it.Title, it.BrowseID)
 	case youtube.MusicSong, youtube.MusicVideo:
 		if it.VideoID != "" {
-			return playVideoCmd(youtube.VideoURL(it.VideoID), m.cfg.Player.Quality, m.cfg.Player.Command, m.cfg.Player.Args)
+			return playVideoCmd(youtube.VideoURL(it.VideoID), "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
 		}
 	case youtube.MusicPlaylist:
 		if it.BrowseID != "" {
@@ -1101,7 +1101,7 @@ func (m *MusicModel) playSelected() tea.Cmd {
 	// Songs/videos have direct videoID
 	if it.VideoID != "" {
 		url := youtube.VideoURL(it.VideoID)
-		return playVideoCmd(url, m.cfg.Player.Quality, m.cfg.Player.Command, m.cfg.Player.Args)
+		return playVideoCmd(url, "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
 	}
 
 	// Albums/playlists need browsing to get a playable URL

@@ -248,7 +248,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			url := m.pendingVideoURL
 			quality := msg.Format.ID
 			m.pendingVideoURL = ""
-			return m, playVideoCmd(url, quality, m.cfg.Player.Command, m.cfg.Player.Args)
+			return m, playVideoCmd(url, quality, m.cfg.Player.Video.Command, m.cfg.Player.Video.Args)
 		}
 		return m, nil
 
@@ -434,7 +434,7 @@ func (m *Model) quickPlay() tea.Cmd {
 	if v == nil {
 		return nil
 	}
-	return playVideoCmd(v.URL, m.cfg.Player.Quality, m.cfg.Player.Command, m.cfg.Player.Args)
+	return playVideoCmd(v.URL, m.cfg.Player.Video.Quality, m.cfg.Player.Video.Command, m.cfg.Player.Video.Args)
 }
 
 func (m *Model) fetchFormatsAndPlay() tea.Cmd {

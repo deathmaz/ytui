@@ -106,10 +106,14 @@ Config file: `~/.config/ytui/config.toml` (respects `$XDG_CONFIG_HOME`)
 All settings are optional -- defaults are used for any missing values.
 
 ```toml
-[player]
+[player.video]
 command = "mpv"                    # player command (default: "mpv")
-args = ["--no-terminal"]           # extra arguments passed to the player
+args = ["--no-terminal"]           # arguments passed to the player
 quality = ""                       # default quality: "1080", "720", "480", "best", "audio" (empty = system default)
+
+[player.music]
+# command = "mpv"                  # defaults to player.video.command if omitted
+# args = ["--no-terminal", "--profile=music"]  # defaults to player.video.args if omitted
 
 [download]
 command = "yt-dlp"                 # download command (default: "yt-dlp")
