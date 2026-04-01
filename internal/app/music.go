@@ -27,6 +27,7 @@ func (k musicKeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "play")),
+		key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "play album")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next section")),
 		key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "load all")),
@@ -301,6 +302,8 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Play):
 			return m, m.playSelected()
+		case msg.String() == "P":
+			return m, m.playAlbum()
 		case key.Matches(msg, m.keys.Auth):
 			return m, m.authenticate()
 		case key.Matches(msg, m.keys.Search), msg.String() == "/":
@@ -1212,6 +1215,20 @@ func (m *MusicModel) playSelected() tea.Cmd {
 		return nil
 	}
 	return m.playItem(*ptr)
+}
+
+func (m *MusicModel) playAlbum() tea.Cmd {
+	tab := m.activeTab()
+	if tab == nil || tab.kind != musicTabAlbum || !tab.loaded || tab.albumPage == nil {
+		return m.setStatus("No album to play", 2*time.Second)
+	}
+	if tab.albumPage.PlaylistID != "" {
+		return playVideoCmd(youtube.MusicPlaylistURL(tab.albumPage.PlaylistID), "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
+	}
+	if len(tab.albumPage.Tracks) > 0 && tab.albumPage.Tracks[0].VideoID != "" {
+		return playVideoCmd(youtube.VideoURL(tab.albumPage.Tracks[0].VideoID), "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
+	}
+	return m.setStatus("No playable tracks", 2*time.Second)
 }
 
 // playItem is the single play entry point for all music items.

@@ -94,6 +94,7 @@ ytui -music -search "metallica"  # music mode with search
 | `Tab` / `Shift+Tab` | Next / previous sub-tab (shelves, sections) |
 | `Enter` | Open item (artist/album/playlist) or play song |
 | `p` | Play selected item |
+| `P` | Play full album/playlist (in album tab) |
 | `L` | Load more (artist sections, library pagination) |
 | `a` | Authenticate (extract browser cookies) |
 | `Esc` | Close current tab / blur input |
