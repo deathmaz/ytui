@@ -10,6 +10,28 @@
           { "text": " • " },
           { "text": "2024" }
         ]
+      },
+      "description": {
+        "runs": [
+          { "text": "This is a fake album description for testing." }
+        ]
+      },
+      "secondSubtitle": {
+        "runs": [
+          { "text": "10 songs" },
+          { "text": " • " },
+          { "text": "42 minutes" }
+        ]
+      },
+      "thumbnail": {
+        "croppedSquareThumbnailRenderer": {
+          "thumbnail": {
+            "thumbnails": [
+              { "url": "https://fake.img/album_sm.jpg", "width": 226, "height": 226 },
+              { "url": "https://fake.img/album_lg.jpg", "width": 544, "height": 544 }
+            ]
+          }
+        }
       }
     }
   },

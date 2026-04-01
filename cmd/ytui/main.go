@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/deathmaz/ytui/internal/app"
 	"github.com/deathmaz/ytui/internal/config"
+	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
 
@@ -38,7 +39,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error creating music client: %v\n", err)
 			os.Exit(1)
 		}
-		m = app.NewMusic(mc, cfg, opts)
+		imgR := ytimage.NewRenderer()
+		m = app.NewMusic(mc, cfg, imgR, opts)
 	} else {
 		client, err := youtube.NewInnerTubeClient(nil)
 		if err != nil {

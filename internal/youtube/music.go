@@ -340,15 +340,64 @@ func (c *MusicClient) GetAlbum(ctx context.Context, browseID string) (*MusicAlbu
 	}
 	if header.Exists() {
 		page.Title = header.Get("title.runs.0.text").String()
+
+		// Subtitle: album type, artist, year
+		firstRun := true
 		header.Get("subtitle.runs").ForEach(func(_, run gjson.Result) bool {
 			text := run.Get("text").String()
-			if page.Artist == "" && text != "Album" && text != " • " && text != "EP" && text != "Single" && text != "Playlist" {
+			if firstRun {
+				firstRun = false
+				switch text {
+				case "Album", "EP", "Single", "Playlist":
+					page.AlbumType = text
+					return true
+				}
+			}
+			if page.Artist == "" && text != " • " {
 				page.Artist = text
 			}
-			// Year is typically the last numeric part
 			if len(text) == 4 && text[0] >= '1' && text[0] <= '2' {
 				page.Year = text
 			}
+			return true
+		})
+
+		// Description
+		var descParts []string
+		header.Get("description.runs").ForEach(func(_, run gjson.Result) bool {
+			descParts = append(descParts, run.Get("text").String())
+			return true
+		})
+		if len(descParts) > 0 {
+			page.Description = strings.Join(descParts, "")
+		}
+
+		// secondSubtitle: track count (run 0) and duration (run 2)
+		secondSub := header.Get("secondSubtitle.runs")
+		if secondSub.Exists() {
+			runs := secondSub.Array()
+			if len(runs) > 0 {
+				page.TrackCount = runs[0].Get("text").String()
+			}
+			if len(runs) > 2 {
+				page.Duration = runs[2].Get("text").String()
+			}
+		}
+
+		// Thumbnails — try multiple paths
+		thumbPath := header.Get("thumbnail.croppedSquareThumbnailRenderer.thumbnail.thumbnails")
+		if !thumbPath.Exists() {
+			thumbPath = header.Get("thumbnail.musicThumbnailRenderer.thumbnail.thumbnails")
+		}
+		if !thumbPath.Exists() {
+			thumbPath = header.Get("thumbnail.thumbnails")
+		}
+		thumbPath.ForEach(func(_, t gjson.Result) bool {
+			page.Thumbnails = append(page.Thumbnails, Thumbnail{
+				URL:    t.Get("url").String(),
+				Width:  int(t.Get("width").Int()),
+				Height: int(t.Get("height").Int()),
+			})
 			return true
 		})
 	}

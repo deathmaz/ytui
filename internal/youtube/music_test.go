@@ -342,6 +342,35 @@ func TestParseAlbumPage(t *testing.T) {
 	assertEqual(t, "Tracks[1].Title", tracks[1].Title, "Track Two")
 	assertEqual(t, "Tracks[1].VideoID", tracks[1].VideoID, "fake_track_002")
 	assertEqual(t, "PlaylistID", playlistID, "OLAKfake_playlist_id")
+
+	t.Run("NewMetadataFields", func(t *testing.T) {
+		// Description
+		var descParts []string
+		header.Get("description.runs").ForEach(func(_, run gjson.Result) bool {
+			descParts = append(descParts, run.Get("text").String())
+			return true
+		})
+		if len(descParts) == 0 {
+			t.Error("expected description runs")
+		}
+		assertEqual(t, "Description", descParts[0], "This is a fake album description for testing.")
+
+		// secondSubtitle: track count + duration
+		secondSub := header.Get("secondSubtitle.runs")
+		runs := secondSub.Array()
+		if len(runs) < 3 {
+			t.Fatalf("expected at least 3 secondSubtitle runs, got %d", len(runs))
+		}
+		assertEqual(t, "TrackCount", runs[0].Get("text").String(), "10 songs")
+		assertEqual(t, "Duration", runs[2].Get("text").String(), "42 minutes")
+
+		// Thumbnails
+		thumbs := header.Get("thumbnail.croppedSquareThumbnailRenderer.thumbnail.thumbnails")
+		if !thumbs.Exists() || len(thumbs.Array()) != 2 {
+			t.Fatalf("expected 2 thumbnails")
+		}
+		assertEqual(t, "Thumb[1].URL", thumbs.Array()[1].Get("url").String(), "https://fake.img/album_lg.jpg")
+	})
 }
 
 func TestParsePlaylistAsTracks(t *testing.T) {

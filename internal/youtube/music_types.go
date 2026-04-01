@@ -43,10 +43,15 @@ type MusicArtistPage struct {
 
 // MusicAlbumPage holds data for an album page.
 type MusicAlbumPage struct {
-	Title      string
-	Artist     string
-	Year       string
-	Tracks     []MusicItem
-	PlaylistID string
+	Title       string
+	Artist      string
+	Year        string
+	AlbumType   string      // "Album", "EP", "Single", "Playlist"
+	Description string      // album description text
+	TrackCount  string      // e.g. "19 songs"
+	Duration    string      // e.g. "1 hour, 17 minutes"
+	Thumbnails  []Thumbnail // album art
+	Tracks      []MusicItem
+	PlaylistID  string
 }
 

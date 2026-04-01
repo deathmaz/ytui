@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/auth"
 	"github.com/deathmaz/ytui/internal/config"
+	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -70,9 +72,12 @@ type musicTab struct {
 	artistSubs   []subTab
 	activeSubTab int
 	// Album page
-	albumPage    *youtube.MusicAlbumPage
-	albumList    list.Model
-	loaded       bool
+	albumPage     *youtube.MusicAlbumPage
+	albumList     list.Model
+	thumbTransmit string
+	thumbPlace    string
+	thumbPending  bool
+	loaded        bool
 }
 
 type musicHomeLoadedMsg struct {
@@ -113,6 +118,32 @@ type musicMoreLoadedMsg struct {
 type musicAuthSuccessMsg struct{ client *youtube.MusicClient }
 type musicAuthFailedMsg struct{ err error }
 
+const (
+	albumThumbCols = 13
+	albumThumbRows = 7
+)
+
+type musicClearTransmitMsg struct{}
+
+func musicClearTransmitCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+		return musicClearTransmitMsg{}
+	})
+}
+
+func bestMusicThumbnail(thumbs []youtube.Thumbnail) string {
+	if len(thumbs) == 0 {
+		return ""
+	}
+	best := thumbs[0]
+	for _, t := range thumbs[1:] {
+		if t.Width > best.Width {
+			best = t
+		}
+	}
+	return best.URL
+}
+
 // musicItem wraps a MusicItem for the list component.
 type musicItem struct {
 	item youtube.MusicItem
@@ -131,6 +162,7 @@ type MusicModel struct {
 	help         help.Model
 	client       *youtube.MusicClient
 	cfg          *config.Config
+	imgR         *ytimage.Renderer
 
 	// Fixed views
 	activeFixed   musicFixedView
@@ -165,7 +197,7 @@ type MusicModel struct {
 }
 
 // NewMusic creates a new root model for music mode.
-func NewMusic(client *youtube.MusicClient, cfg *config.Config, opts Options) *MusicModel {
+func NewMusic(client *youtube.MusicClient, cfg *config.Config, imgR *ytimage.Renderer, opts Options) *MusicModel {
 	h := help.New()
 	h.ShortSeparator = "  "
 
@@ -185,6 +217,7 @@ func NewMusic(client *youtube.MusicClient, cfg *config.Config, opts Options) *Mu
 		help:          h,
 		client:        client,
 		cfg:           cfg,
+		imgR:          imgR,
 		searchInput:   ti,
 		searchResults: l,
 		searchSpinner: sp,
@@ -474,6 +507,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setStatus("Error: "+msg.Err.Error(), 5*time.Second)
 		}
+		var fetchCmd tea.Cmd
 		for i := range m.tabs {
 			tab := &m.tabs[i]
 			if tab.browseID == msg.BrowseID && tab.kind == musicTabAlbum && !tab.loaded {
@@ -481,10 +515,23 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				tab.albumList = m.buildAlbumList(msg.Album)
 				tab.loaded = true
 				m.resizeViews()
+				if m.imgR != nil && len(msg.Album.Thumbnails) > 0 {
+					thumbURL := bestMusicThumbnail(msg.Album.Thumbnails)
+					if thumbURL != "" {
+						if tx, pl := m.imgR.Get(thumbURL); pl != "" {
+							tab.thumbTransmit = tx
+							tab.thumbPlace = pl
+							fetchCmd = musicClearTransmitCmd()
+						} else {
+							tab.thumbPending = true
+							fetchCmd = m.imgR.FetchCmd(thumbURL, albumThumbCols, albumThumbRows)
+						}
+					}
+				}
 				break
 			}
 		}
-		return m, nil
+		return m, fetchCmd
 
 	case musicMoreLoadedMsg:
 		m.statusMsg = ""
@@ -541,6 +588,28 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.authenticating = false
 		return m, m.setStatus("Auth failed: "+msg.err.Error(), 5*time.Second)
 
+	case ytimage.ThumbnailLoadedMsg:
+		for i := range m.tabs {
+			tab := &m.tabs[i]
+			if tab.kind == musicTabAlbum && tab.loaded && tab.thumbPending {
+				if len(tab.albumPage.Thumbnails) > 0 && bestMusicThumbnail(tab.albumPage.Thumbnails) == msg.URL {
+					tab.thumbPending = false
+					if msg.Err == nil && msg.Placeholder != "" {
+						m.imgR.Store(msg.URL, msg.TransmitStr, msg.Placeholder)
+						tab.thumbTransmit = msg.TransmitStr
+						tab.thumbPlace = msg.Placeholder
+						cmds = append(cmds, musicClearTransmitCmd())
+					}
+					break
+				}
+			}
+		}
+
+	case musicClearTransmitMsg:
+		for i := range m.tabs {
+			m.tabs[i].thumbTransmit = ""
+		}
+
 	case clearStatusMsg:
 		if msg.seq == m.statusSeq {
 			m.statusMsg = ""
@@ -580,7 +649,13 @@ func (m *MusicModel) View() string {
 	}
 	sections = append(sections, helpView)
 
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
+
+	if tab := m.activeTab(); tab != nil && tab.thumbTransmit != "" {
+		view = tab.thumbTransmit + view
+	}
+
+	return view
 }
 
 func (m *MusicModel) loadHome() tea.Cmd {
@@ -1006,13 +1081,55 @@ func (m *MusicModel) renderAlbumPage(tab *musicTab) string {
 	if tab.albumPage == nil {
 		return ""
 	}
-	header := styles.Title.Render(tab.albumPage.Title)
-	if tab.albumPage.Artist != "" {
-		header += "  " + styles.Subtitle.Render(tab.albumPage.Artist)
+	album := tab.albumPage
+	var infoLines []string
+
+	// Album art + title/meta side by side
+	title := styles.Title.Render(album.Title)
+	meta := ""
+	if album.Artist != "" {
+		meta = styles.Subtitle.Render(album.Artist)
 	}
-	if tab.albumPage.Year != "" {
-		header += "  " + styles.Dim.Render(tab.albumPage.Year)
+	if album.Year != "" {
+		if meta != "" {
+			meta += "  "
+		}
+		meta += styles.Dim.Render(album.Year)
 	}
+	var infoParts []string
+	if album.AlbumType != "" {
+		infoParts = append(infoParts, album.AlbumType)
+	}
+	if album.TrackCount != "" {
+		infoParts = append(infoParts, album.TrackCount)
+	}
+	if album.Duration != "" {
+		infoParts = append(infoParts, album.Duration)
+	}
+
+	textBlock := "\n" + title
+	if meta != "" {
+		textBlock += "\n" + meta
+	}
+	if len(infoParts) > 0 {
+		textBlock += "\n" + styles.Dim.Render(strings.Join(infoParts, " • "))
+	}
+	if album.Description != "" {
+		wrapped := lipgloss.NewStyle().Width(m.width - albumThumbCols - 4).Render(album.Description)
+		textBlock += "\n" + styles.Dim.Render(wrapped)
+	}
+
+	if tab.thumbPlace != "" {
+		infoLines = append(infoLines, lipgloss.JoinHorizontal(lipgloss.Top, tab.thumbPlace+"  ", textBlock))
+	} else if tab.thumbPending {
+		// Reserve space for the image while it loads
+		placeholder := lipgloss.NewStyle().Width(albumThumbCols).Height(albumThumbRows).Render("")
+		infoLines = append(infoLines, lipgloss.JoinHorizontal(lipgloss.Top, placeholder+"  ", textBlock))
+	} else {
+		infoLines = append(infoLines, textBlock)
+	}
+
+	header := lipgloss.JoinVertical(lipgloss.Left, infoLines...)
 
 	ch := m.contentHeight()
 	tab.albumList.SetSize(m.width, ch-lipgloss.Height(header))
