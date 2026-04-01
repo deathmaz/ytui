@@ -160,10 +160,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Esc handling
 		if key.Matches(msg, m.keys.Back) && !inputHasFocus {
 			if m.activeView == ViewVideoTab {
-				// If in comment mode, let detail handle Esc (exits comment mode)
-				if tab := m.activeTab(); tab != nil && tab.detail.InCommentMode() {
-					break
-				}
 				m.closeActiveVideoTab()
 				if len(m.videoTabs) > 0 {
 					m.activeTabIdx = len(m.videoTabs) - 1

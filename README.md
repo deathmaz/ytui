@@ -71,8 +71,8 @@ ytui -music -search "metallica"  # music mode with search
 | `p` | Play video (default/config quality) |
 | `P` | Play video (pick quality from list) |
 | `d` | Download video |
-| `c` | Enter comment focus mode (in detail view) |
-| `l` / `h` | Expand / collapse replies (in comment mode) |
+| `Tab` / `Shift+Tab` | Switch between Info / Comments (in detail view) |
+| `l` / `h` | Expand / collapse replies (in Comments tab) |
 | `L` | Load more (comments / search results) |
 | `a` | Authenticate (extract browser cookies) |
 | `o` | Open video in browser |

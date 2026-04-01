@@ -36,6 +36,15 @@ var (
 
 	Success = lipgloss.NewStyle().
 		Foreground(Green)
+
+	SubTab = lipgloss.NewStyle().
+		Padding(0, 1).
+		Foreground(DimGray)
+
+	ActiveSubTab = lipgloss.NewStyle().
+			Padding(0, 1).
+			Bold(true).
+			Foreground(Cyan)
 )
 
 // NewSpinner creates a consistently styled spinner.

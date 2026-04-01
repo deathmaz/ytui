@@ -1073,8 +1073,8 @@ func (m *MusicModel) renderSearch() string {
 }
 
 var (
-	subTabStyle       = lipgloss.NewStyle().Padding(0, 1).Foreground(styles.DimGray)
-	activeSubTabStyle = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(styles.Cyan)
+	subTabStyle       = styles.SubTab
+	activeSubTabStyle = styles.ActiveSubTab
 )
 
 func renderSubTabBar(subs []subTab, activeIdx int) string {
