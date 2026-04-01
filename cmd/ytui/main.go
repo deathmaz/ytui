@@ -39,8 +39,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error creating music client: %v\n", err)
 			os.Exit(1)
 		}
+		ytClient, err := youtube.NewInnerTubeClient(nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error creating youtube client: %v\n", err)
+			os.Exit(1)
+		}
 		imgR := ytimage.NewRenderer()
-		m = app.NewMusic(mc, cfg, imgR, opts)
+		m = app.NewMusic(mc, ytClient, cfg, imgR, opts)
 	} else {
 		client, err := youtube.NewInnerTubeClient(nil)
 		if err != nil {

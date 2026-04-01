@@ -16,6 +16,7 @@ import (
 	"github.com/deathmaz/ytui/internal/auth"
 	"github.com/deathmaz/ytui/internal/config"
 	ytimage "github.com/deathmaz/ytui/internal/image"
+	"github.com/deathmaz/ytui/internal/ui/detail"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -56,6 +57,7 @@ type musicTabKind int
 const (
 	musicTabArtist musicTabKind = iota
 	musicTabAlbum
+	musicTabSong
 )
 
 type subTab struct {
@@ -78,7 +80,9 @@ type musicTab struct {
 	thumbTransmit string
 	thumbPlace    string
 	thumbPending  bool
-	loaded        bool
+	// Song detail (comments)
+	songDetail detail.Model
+	loaded     bool
 }
 
 type musicHomeLoadedMsg struct {
@@ -162,6 +166,7 @@ type MusicModel struct {
 	keys         KeyMap
 	help         help.Model
 	client       *youtube.MusicClient
+	ytClient     youtube.Client
 	cfg          *config.Config
 	imgR         *ytimage.Renderer
 
@@ -198,7 +203,7 @@ type MusicModel struct {
 }
 
 // NewMusic creates a new root model for music mode.
-func NewMusic(client *youtube.MusicClient, cfg *config.Config, imgR *ytimage.Renderer, opts Options) *MusicModel {
+func NewMusic(client *youtube.MusicClient, ytClient youtube.Client, cfg *config.Config, imgR *ytimage.Renderer, opts Options) *MusicModel {
 	h := help.New()
 	h.ShortSeparator = "  "
 
@@ -217,6 +222,7 @@ func NewMusic(client *youtube.MusicClient, cfg *config.Config, imgR *ytimage.Ren
 		keys:          DefaultKeyMap(),
 		help:          h,
 		client:        client,
+		ytClient:      ytClient,
 		cfg:           cfg,
 		imgR:          imgR,
 		searchInput:   ti,
@@ -250,13 +256,43 @@ func (m *MusicModel) Init() tea.Cmd {
 func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.help.Width = msg.Width
+	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = wsm.Width
+		m.height = wsm.Height
+		m.help.Width = wsm.Width
 		m.resizeViews()
+	}
 
+	// Delegate to song detail tab
+	if tab := m.activeTab(); tab != nil && tab.kind == musicTabSong {
+		handled := true
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch {
+			case key.Matches(keyMsg, m.keys.ForceQuit):
+				return m, tea.Quit
+			case key.Matches(keyMsg, m.keys.Quit):
+				return m, tea.Quit
+			case key.Matches(keyMsg, m.keys.Back):
+				m.closeActiveTab()
+				return m, nil
+			case key.Matches(keyMsg, m.keys.Play):
+				return m, playVideoCmd(youtube.VideoURL(tab.browseID), "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
+			default:
+				// Let tab number keys fall through to main handler
+				if k := keyMsg.String(); len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
+					handled = false
+				}
+			}
+		}
+		if handled {
+			var cmd tea.Cmd
+			tab.songDetail, cmd = tab.songDetail.Update(msg)
+			cmds = append(cmds, cmd)
+			return m, tea.Batch(cmds...)
+		}
+	}
+
+	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if key.Matches(msg, m.keys.ForceQuit) {
 			return m, tea.Quit
@@ -790,12 +826,6 @@ func (m *MusicModel) openSelected() tea.Cmd {
 	if it == nil {
 		return nil
 	}
-	// Album tracks: Enter plays
-	if !m.onFixedView {
-		if tab := m.activeTab(); tab != nil && tab.kind == musicTabAlbum {
-			return m.playSelected()
-		}
-	}
 	return m.openMusicItem(*it)
 }
 
@@ -812,7 +842,9 @@ func (m *MusicModel) openMusicItem(it youtube.MusicItem) tea.Cmd {
 		}
 		return m.openTab(musicTabAlbum, it.Title, it.BrowseID)
 	case youtube.MusicSong, youtube.MusicVideo:
-		return m.playItem(it)
+		if it.VideoID != "" {
+			return m.openTab(musicTabSong, it.Title, it.VideoID)
+		}
 	case youtube.MusicPlaylist:
 		if it.BrowseID != "" {
 			return m.openTab(musicTabAlbum, it.Title, it.BrowseID)
@@ -834,11 +866,25 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 		return m.setStatus("Max tabs reached (close one with Esc)", 3*time.Second)
 	}
 
-	m.tabs = append(m.tabs, musicTab{
+	tab := musicTab{
 		kind:     kind,
 		title:    title,
 		browseID: browseID,
-	})
+	}
+
+	// Song tabs use the detail.Model directly
+	if kind == musicTabSong {
+		d := detail.New(m.ytClient, m.imgR)
+		d.SetSize(m.width, m.contentHeight())
+		tab.songDetail = d
+		tab.loaded = true
+		m.tabs = append(m.tabs, tab)
+		m.activeTabIdx = len(m.tabs) - 1
+		m.onFixedView = false
+		return tab.songDetail.LoadVideo(browseID)
+	}
+
+	m.tabs = append(m.tabs, tab)
 	m.activeTabIdx = len(m.tabs) - 1
 	m.onFixedView = false
 	m.pageLoading = true
@@ -898,8 +944,11 @@ func (m *MusicModel) renderTabs() string {
 	// Dynamic tabs
 	for i, tab := range m.tabs {
 		icon := "♫"
-		if tab.kind == musicTabAlbum {
+		switch tab.kind {
+		case musicTabAlbum:
 			icon = "◉"
+		case musicTabSong:
+			icon = "♪"
 		}
 		label := fmt.Sprintf("[%d] %s", i+4, shared.Truncate(icon+" "+tab.title, 22))
 		style := tabStyle
@@ -939,6 +988,8 @@ func (m *MusicModel) renderContent() string {
 			return m.renderArtistPage(tab)
 		case musicTabAlbum:
 			return m.renderAlbumPage(tab)
+		case musicTabSong:
+			return tab.songDetail.View()
 		}
 	}
 	return ""
@@ -1162,7 +1213,12 @@ func (m *MusicModel) resizeViews() {
 	inputHeight := lipgloss.Height(inputView)
 	m.searchResults.SetSize(m.width, ch-inputHeight)
 	m.searchInput.Width = m.width - 4
-	// Artist/album lists are sized dynamically during rendering
+	// Resize song detail tabs
+	for i := range m.tabs {
+		if m.tabs[i].kind == musicTabSong {
+			m.tabs[i].songDetail.SetSize(m.width, ch)
+		}
+	}
 }
 
 func (m *MusicModel) searchCmd(query string) tea.Cmd {
