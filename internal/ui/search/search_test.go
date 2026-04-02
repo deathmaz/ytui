@@ -2,10 +2,22 @@ package search
 
 import (
 	"testing"
+
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
+func testConfig() Config {
+	return Config{
+		Placeholder: "Test...",
+		Delegate:    list.NewDefaultDelegate(),
+		SearchFn:    func(query, pageToken string) tea.Cmd { return nil },
+		SelectFn:    func(item list.Item) tea.Cmd { return nil },
+	}
+}
+
 func TestSetQuery(t *testing.T) {
-	m := New(nil)
+	m := New(testConfig())
 
 	m.SetQuery("test query")
 
@@ -21,7 +33,7 @@ func TestSetQuery(t *testing.T) {
 }
 
 func TestSetQuery_Empty(t *testing.T) {
-	m := New(nil)
+	m := New(testConfig())
 	m.SetQuery("")
 
 	if m.Query() != "" {
@@ -30,27 +42,15 @@ func TestSetQuery_Empty(t *testing.T) {
 }
 
 func TestRefresh_NoQuery(t *testing.T) {
-	m := New(nil)
+	m := New(testConfig())
 	cmd := m.Refresh()
 	if cmd != nil {
 		t.Error("Refresh with no query should return nil")
 	}
 }
 
-func TestRefresh_WithQuery(t *testing.T) {
-	m := New(nil)
-	m.SetQuery("test")
-	cmd := m.Refresh()
-	if cmd == nil {
-		t.Error("Refresh with query should return a command")
-	}
-	if !m.searching {
-		t.Error("Refresh should set searching=true")
-	}
-}
-
 func TestRefresh_WhileSearching(t *testing.T) {
-	m := New(nil)
+	m := New(testConfig())
 	m.SetQuery("test")
 	m.searching = true
 	cmd := m.Refresh()

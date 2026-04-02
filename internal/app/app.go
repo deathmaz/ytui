@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/auth"
@@ -103,7 +104,7 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 	h := help.New()
 	h.ShortSeparator = "  "
 	imgR := ytimage.NewRenderer()
-	s := search.New(client)
+	s := search.New(newVideoSearchConfig(client))
 	if opts.SearchQuery != "" {
 		s.SetQuery(opts.SearchQuery)
 	}
@@ -276,7 +277,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case authSuccessMsg:
 		m.authenticating = false
 		m.ytClient = msg.client
-		m.search = search.New(msg.client)
+		m.search = search.New(newVideoSearchConfig(msg.client))
 		m.feed = feed.New(msg.client)
 		m.subs = subs.New(msg.client)
 		m.resizeViews()
@@ -432,8 +433,8 @@ func (m *Model) switchTo(v View) {
 func (m *Model) selectedVideo() *youtube.Video {
 	switch m.activeView {
 	case ViewSearch:
-		if v, ok := m.search.SelectedVideo(); ok {
-			return &v
+		if item, ok := m.search.SelectedItem().(shared.VideoItem); ok {
+			return &item.Video
 		}
 	case ViewFeed:
 		if v, ok := m.feed.SelectedVideo(); ok {
@@ -691,3 +692,34 @@ func (m *Model) renderContent() string {
 	return ""
 }
 
+func newVideoSearchConfig(client youtube.Client) search.Config {
+	return search.Config{
+		Placeholder: "Search YouTube...",
+		Delegate:    shared.VideoDelegate{},
+		SearchFn: func(query, pageToken string) tea.Cmd {
+			return func() tea.Msg {
+				page, err := client.Search(context.Background(), query, pageToken)
+				if err != nil {
+					return search.ResultMsg{Err: err}
+				}
+				var items []list.Item
+				for _, v := range page.Items {
+					items = append(items, shared.VideoItem{Video: v})
+				}
+				return search.ResultMsg{
+					Items:     items,
+					NextToken: page.NextToken,
+					Append:    pageToken != "",
+				}
+			}
+		},
+		SelectFn: func(item list.Item) tea.Cmd {
+			if vi, ok := item.(shared.VideoItem); ok {
+				return func() tea.Msg {
+					return shared.VideoSelectedMsg{Video: vi.Video}
+				}
+			}
+			return nil
+		},
+	}
+}
