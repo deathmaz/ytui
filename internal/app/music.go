@@ -204,7 +204,6 @@ func NewMusic(client *youtube.MusicClient, ytClient youtube.Client, cfg *config.
 	if opts.SearchQuery != "" {
 		s.SetQuery(opts.SearchQuery)
 	}
-
 	m := &MusicModel{
 		onFixedView: true,
 		activeFixed: musicViewSearch,
@@ -223,21 +222,15 @@ func NewMusic(client *youtube.MusicClient, ytClient youtube.Client, cfg *config.
 }
 
 func (m *MusicModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.search.Init()}
-	if m.cfg.Auth.AuthOnStartup {
-		cmds = append(cmds, m.authenticate())
-		if m.pendingOpen != nil {
-			return tea.Batch(cmds...)
-		}
-	}
-	if m.pendingOpen != nil {
-		cmds = append(cmds, m.openParsedURL(m.pendingOpen))
-		m.pendingOpen = nil
-	}
-	if m.search.Query() != "" {
-		cmds = append(cmds, m.search.Refresh())
-	}
-	return tea.Batch(cmds...)
+	return initCmds(
+		m.cfg.Auth.AuthOnStartup,
+		&m.pendingOpen,
+		m.search.Init(),
+		m.authenticate,
+		m.openParsedURL,
+		m.search.Query(),
+		m.search.Refresh,
+	)
 }
 
 func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -248,6 +241,10 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = wsm.Height
 		m.help.Width = wsm.Width
 		m.resizeViews()
+	}
+
+	if searchCmd, ok := handleSearchFocused(msg, &m.search, m.onFixedView && m.activeFixed == musicViewSearch, m.keys); ok {
+		return m, searchCmd
 	}
 
 	// Delegate to song detail tab
@@ -286,18 +283,6 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if key.Matches(msg, m.keys.ForceQuit) {
 			return m, tea.Quit
-		}
-
-		// When search input is focused, only handle quit — rest goes to search model
-		if m.search.InputFocused() {
-			switch {
-			case key.Matches(msg, m.keys.Quit):
-				return m, tea.Quit
-			default:
-				var cmd tea.Cmd
-				m.search, cmd = m.search.Update(msg)
-				return m, cmd
-			}
 		}
 
 		// Global keys
@@ -616,8 +601,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case clearStatusMsg:
-		if msg.seq == m.statusSeq {
-			m.statusMsg = ""
+		if handleClearStatus(msg, m.statusSeq, &m.statusMsg) {
 			m.resizeViews()
 		}
 
@@ -644,24 +628,17 @@ func (m *MusicModel) View() string {
 		return "Loading..."
 	}
 
-	tabs := m.renderTabs()
-	content := m.renderContent()
-
 	var statusLine string
 	if m.statusMsg != "" {
 		statusLine = styles.Accent.Render(m.statusMsg)
 	}
 
-	helpView := statusBarStyle.Render(m.help.View(musicKeyMap{}))
-
-	var sections []string
-	sections = append(sections, tabs, content)
-	if statusLine != "" {
-		sections = append(sections, statusLine)
-	}
-	sections = append(sections, helpView)
-
-	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	view := composeSections(
+		m.renderTabs(),
+		m.renderContent(),
+		statusLine,
+		statusBarStyle.Render(m.help.View(musicKeyMap{})),
+	)
 
 	if tab := m.activeTab(); tab != nil && tab.thumbTransmit != "" {
 		view = tab.thumbTransmit + view
@@ -1175,17 +1152,9 @@ func (m *MusicModel) renderAlbumPage(tab *musicTab) string {
 }
 
 func (m *MusicModel) contentHeight() int {
-	tabs := m.renderTabs()
-	helpView := statusBarStyle.Render(m.help.View(musicKeyMap{}))
-	overhead := lipgloss.Height(tabs) + lipgloss.Height(helpView)
-	if m.statusMsg != "" {
-		overhead++
-	}
-	h := m.height - overhead
-	if h < 1 {
-		h = 1
-	}
-	return h
+	return calcContentHeight(m.height, m.renderTabs(),
+		statusBarStyle.Render(m.help.View(musicKeyMap{})),
+		m.statusMsg != "")
 }
 
 func (m *MusicModel) resizeViews() {
@@ -1383,11 +1352,7 @@ func newMusicSearchConfig(client *youtube.MusicClient) search.Config {
 }
 
 func (m *MusicModel) setStatus(msg string, clearAfter time.Duration) tea.Cmd {
-	m.statusSeq++
-	m.statusMsg = msg
+	cmd := setStatusCmd(&m.statusSeq, &m.statusMsg, msg, clearAfter)
 	m.resizeViews()
-	seq := m.statusSeq
-	return tea.Tick(clearAfter, func(time.Time) tea.Msg {
-		return clearStatusMsg{seq: seq}
-	})
+	return cmd
 }

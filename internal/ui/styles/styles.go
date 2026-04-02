@@ -45,6 +45,22 @@ var (
 			Padding(0, 1).
 			Bold(true).
 			Foreground(Cyan)
+
+	Tab = lipgloss.NewStyle().
+		Padding(0, 2)
+
+	ActiveTab = lipgloss.NewStyle().
+			Padding(0, 2).
+			Bold(true).
+			Foreground(Red)
+
+	StatusBar = lipgloss.NewStyle().
+			Foreground(DimGray)
+
+	TabSeparator = lipgloss.NewStyle().
+			BorderBottom(true).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(DarkGray)
 )
 
 // NewSpinner creates a consistently styled spinner.

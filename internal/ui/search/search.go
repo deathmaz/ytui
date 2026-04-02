@@ -97,6 +97,12 @@ func (m *Model) Focus() {
 	m.input.Focus()
 }
 
+// Blur removes focus from the search input.
+func (m *Model) Blur() {
+	m.focused = focusList
+	m.input.Blur()
+}
+
 // InputFocused reports whether the text input has focus.
 func (m Model) InputFocused() bool {
 	return m.focused == focusInput
@@ -134,7 +140,10 @@ func (m Model) SelectedItem() list.Item {
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
-	return textinput.Blink
+	if m.focused == focusInput {
+		return textinput.Blink
+	}
+	return nil
 }
 
 // Update handles messages.

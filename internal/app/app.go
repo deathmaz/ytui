@@ -29,21 +29,10 @@ import (
 )
 
 var (
-	tabStyle = lipgloss.NewStyle().
-			Padding(0, 2)
-
-	activeTabStyle = tabStyle.
-			Bold(true).
-			Foreground(styles.Red)
-
-	statusBarStyle = lipgloss.NewStyle().
-			Foreground(styles.DimGray)
-
-	tabSeparatorStyle = lipgloss.NewStyle().
-				BorderBottom(true).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderForeground(styles.DarkGray)
-
+	tabStyle          = styles.Tab
+	activeTabStyle    = styles.ActiveTab
+	statusBarStyle    = styles.StatusBar
+	tabSeparatorStyle = styles.TabSeparator
 )
 
 type playerErrorMsg struct{ err error }
@@ -124,23 +113,15 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	var cmds []tea.Cmd
-	cmds = append(cmds, m.search.Init())
-	if m.cfg.Auth.AuthOnStartup {
-		cmds = append(cmds, m.authenticate())
-		// Defer open until auth completes
-		if m.pendingOpen != nil {
-			return tea.Batch(cmds...)
-		}
-	}
-	if m.pendingOpen != nil {
-		cmds = append(cmds, m.openParsedURL(m.pendingOpen))
-		m.pendingOpen = nil
-	}
-	if m.search.Query() != "" {
-		cmds = append(cmds, m.search.Refresh())
-	}
-	return tea.Batch(cmds...)
+	return initCmds(
+		m.cfg.Auth.AuthOnStartup,
+		&m.pendingOpen,
+		m.search.Init(),
+		m.authenticate,
+		m.openParsedURL,
+		m.search.Query(),
+		m.search.Refresh,
+	)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -162,15 +143,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
-		// ctrl+c always quits, regardless of input focus
 		if key.Matches(msg, m.keys.ForceQuit) {
 			return m, tea.Quit
 		}
 
-		inputHasFocus := m.activeView == ViewSearch && m.search.InputFocused()
+		if searchFocusedCmd, ok := handleSearchFocused(msg, &m.search, m.activeView == ViewSearch, m.keys); ok {
+			return m, searchFocusedCmd
+		}
 
 		// Esc handling
-		if key.Matches(msg, m.keys.Back) && !inputHasFocus {
+		if key.Matches(msg, m.keys.Back) {
 			if m.activeView == ViewVideoTab {
 				m.closeActiveVideoTab()
 				if len(m.videoTabs) > 0 {
@@ -182,9 +164,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Skip single-key global bindings when text input has focus
-		if !inputHasFocus {
-			switch {
+		switch {
 			case key.Matches(msg, m.keys.Quit):
 				return m, tea.Quit
 			case key.Matches(msg, m.keys.Help):
@@ -219,13 +199,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Video tab number keys (4-9)
-			if k := msg.String(); len(k) == 1 && k[0] >= '4' && k[0] <= '9' {
-				idx := int(k[0]-'4')
-				if idx < len(m.videoTabs) {
-					m.activeView = ViewVideoTab
-					m.activeTabIdx = idx
-					return m, nil
-				}
+		if k := msg.String(); len(k) == 1 && k[0] >= '4' && k[0] <= '9' {
+			idx := int(k[0] - '4')
+			if idx < len(m.videoTabs) {
+				m.activeView = ViewVideoTab
+				m.activeTabIdx = idx
+				return m, nil
 			}
 		}
 
@@ -301,8 +280,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.setStatus("Auth failed: "+msg.err.Error(), 5*time.Second)
 
 	case clearStatusMsg:
-		if msg.seq == m.statusSeq {
-			m.statusMsg = ""
+		if handleClearStatus(msg, m.statusSeq, &m.statusMsg) {
 			m.resizeViews()
 		}
 	}
@@ -344,9 +322,6 @@ func (m *Model) View() string {
 		return m.picker.View()
 	}
 
-	tabs := m.renderTabs()
-	content := m.renderContent()
-
 	var statusLine string
 	if m.statusMsg != "" {
 		statusLine = styles.Accent.Render(m.statusMsg)
@@ -354,16 +329,12 @@ func (m *Model) View() string {
 		statusLine = styles.Dim.Render("Downloading...")
 	}
 
-	helpView := statusBarStyle.Render(m.help.View(m.keys))
-
-	var sections []string
-	sections = append(sections, tabs, content)
-	if statusLine != "" {
-		sections = append(sections, statusLine)
-	}
-	sections = append(sections, helpView)
-
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	return composeSections(
+		m.renderTabs(),
+		m.renderContent(),
+		statusLine,
+		statusBarStyle.Render(m.help.View(m.keys)),
+	)
 }
 
 // activeTab returns the currently active video tab, or nil.
@@ -502,13 +473,9 @@ func (m *Model) startDownload() tea.Cmd {
 }
 
 func (m *Model) setStatus(msg string, clearAfter time.Duration) tea.Cmd {
-	m.statusSeq++
-	m.statusMsg = msg
+	cmd := setStatusCmd(&m.statusSeq, &m.statusMsg, msg, clearAfter)
 	m.resizeViews()
-	seq := m.statusSeq
-	return tea.Tick(clearAfter, func(time.Time) tea.Msg {
-		return clearStatusMsg{seq: seq}
-	})
+	return cmd
 }
 
 func (m *Model) authenticate() tea.Cmd {
@@ -611,17 +578,9 @@ func playVideoCmd(url, format, playerCmd string, playerArgs []string) tea.Cmd {
 }
 
 func (m *Model) contentHeight() int {
-	tabs := m.renderTabs()
-	helpView := statusBarStyle.Render(m.help.View(m.keys))
-	overhead := lipgloss.Height(tabs) + lipgloss.Height(helpView)
-	if m.statusMsg != "" || m.downloading {
-		overhead++
-	}
-	h := m.height - overhead
-	if h < 1 {
-		h = 1
-	}
-	return h
+	return calcContentHeight(m.height, m.renderTabs(),
+		statusBarStyle.Render(m.help.View(m.keys)),
+		m.statusMsg != "" || m.downloading)
 }
 
 func (m *Model) resizeViews() {
