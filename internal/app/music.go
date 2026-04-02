@@ -198,6 +198,7 @@ type MusicModel struct {
 	pageLoading  bool
 
 	authenticating bool
+	pendingOpen    *youtube.ParsedURL
 	statusMsg      string
 	statusSeq      int
 }
@@ -238,6 +239,7 @@ func NewMusic(client *youtube.MusicClient, ytClient youtube.Client, cfg *config.
 		m.searchFocused = false
 	}
 
+	m.pendingOpen = opts.OpenURL
 	return m
 }
 
@@ -245,6 +247,14 @@ func (m *MusicModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{textinput.Blink}
 	if m.cfg.Auth.AuthOnStartup {
 		cmds = append(cmds, m.authenticate())
+		// Defer open until auth completes
+		if m.pendingOpen != nil {
+			return tea.Batch(cmds...)
+		}
+	}
+	if m.pendingOpen != nil {
+		cmds = append(cmds, m.openParsedURL(m.pendingOpen))
+		m.pendingOpen = nil
 	}
 	if m.query != "" {
 		m.searching = true
@@ -288,6 +298,9 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			tab.songDetail, cmd = tab.songDetail.Update(msg)
 			cmds = append(cmds, cmd)
+			if vlm, ok := msg.(detail.VideoLoadedMsg); ok && vlm.Err == nil && vlm.Video != nil && tab.title == "" {
+				tab.title = vlm.Video.Title
+			}
 			return m, tea.Batch(cmds...)
 		}
 	}
@@ -534,6 +547,9 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if tab.browseID == msg.BrowseID && tab.kind == musicTabArtist && !tab.loaded {
 				tab.artistPage = msg.Artist
 				tab.artistSubs = m.buildArtistSubTabs(msg.Artist)
+				if msg.Artist.Name != "" {
+					tab.title = msg.Artist.Name
+				}
 				tab.loaded = true
 				m.resizeViews()
 				break
@@ -552,6 +568,9 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if tab.browseID == msg.BrowseID && tab.kind == musicTabAlbum && !tab.loaded {
 				tab.albumPage = msg.Album
 				tab.albumList = m.buildAlbumList(msg.Album)
+				if msg.Album.Title != "" {
+					tab.title = msg.Album.Title
+				}
 				tab.loaded = true
 				m.resizeViews()
 				if m.imgR != nil && len(msg.Album.Thumbnails) > 0 {
@@ -621,7 +640,12 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case musicViewLibrary:
 			reloadCmd = m.loadLibrary()
 		}
-		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), reloadCmd)
+		var openCmd tea.Cmd
+		if m.pendingOpen != nil {
+			openCmd = m.openParsedURL(m.pendingOpen)
+			m.pendingOpen = nil
+		}
+		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), reloadCmd, openCmd)
 
 	case musicAuthFailedMsg:
 		m.authenticating = false
@@ -853,6 +877,27 @@ func (m *MusicModel) openMusicItem(it youtube.MusicItem) tea.Cmd {
 	return nil
 }
 
+func (m *MusicModel) openParsedURL(p *youtube.ParsedURL) tea.Cmd {
+	if p == nil {
+		return nil
+	}
+	m.searchFocused = false
+	m.searchInput.Blur()
+	switch p.Kind {
+	case youtube.URLVideo:
+		return m.openTab(musicTabSong, "", p.ID)
+	case youtube.URLPlaylist:
+		browseID := p.ID
+		if !strings.HasPrefix(browseID, "VL") {
+			browseID = "VL" + browseID
+		}
+		return m.openTab(musicTabAlbum, "", browseID)
+	case youtube.URLChannel:
+		return m.openTab(musicTabArtist, "", p.ID)
+	}
+	return nil
+}
+
 func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd {
 	// Check if already open
 	for i, tab := range m.tabs {
@@ -881,7 +926,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 		m.tabs = append(m.tabs, tab)
 		m.activeTabIdx = len(m.tabs) - 1
 		m.onFixedView = false
-		return tab.songDetail.LoadVideo(browseID)
+		return m.tabs[m.activeTabIdx].songDetail.LoadVideo(browseID)
 	}
 
 	m.tabs = append(m.tabs, tab)
@@ -950,7 +995,11 @@ func (m *MusicModel) renderTabs() string {
 		case musicTabSong:
 			icon = "♪"
 		}
-		label := fmt.Sprintf("[%d] %s", i+4, shared.Truncate(icon+" "+tab.title, 22))
+		title := tab.title
+		if title == "" {
+			title = "..."
+		}
+		label := fmt.Sprintf("[%d] %s", i+4, shared.Truncate(icon+" "+title, 22))
 		style := tabStyle
 		if !m.onFixedView && m.activeTabIdx == i {
 			style = activeTabStyle

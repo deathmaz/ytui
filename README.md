@@ -52,6 +52,10 @@ ytui                        # start in video mode
 ytui -search "go tutorial"  # search immediately on startup
 ytui -music                 # start in YouTube Music mode
 ytui -music -search "metallica"  # music mode with search
+ytui -open "https://www.youtube.com/watch?v=ID"  # open a video directly
+ytui -open "https://youtu.be/ID"                 # short URL works too
+ytui -open "dQw4w9WgXcQ"                         # raw video ID
+ytui -music -open "https://youtube.com/playlist?list=PLxxx"  # open playlist in music mode
 ```
 
 ## Keybindings

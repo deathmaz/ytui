@@ -85,6 +85,7 @@ type Model struct {
 	activeTabIdx  int // index into videoTabs for current video tab
 
 	pendingVideoURL string
+	pendingOpen     *youtube.ParsedURL
 	statusMsg       string
 	statusSeq       int
 	downloading     bool
@@ -94,6 +95,7 @@ type Model struct {
 // Options holds startup options from command-line flags.
 type Options struct {
 	SearchQuery string
+	OpenURL     *youtube.ParsedURL
 }
 
 // New creates a new root model with the given YouTube client, config, and options.
@@ -106,16 +108,17 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 		s.SetQuery(opts.SearchQuery)
 	}
 	return &Model{
-		activeView: ViewSearch,
-		keys:       DefaultKeyMap(),
-		help:       h,
-		search:     s,
-		feed:       feed.New(client),
-		subs:       subs.New(client),
-		imgR:       imgR,
-		ytClient:   client,
-		picker:     picker.New(),
-		cfg:        cfg,
+		activeView:  ViewSearch,
+		keys:        DefaultKeyMap(),
+		help:        h,
+		search:      s,
+		feed:        feed.New(client),
+		subs:        subs.New(client),
+		imgR:        imgR,
+		ytClient:    client,
+		picker:      picker.New(),
+		cfg:         cfg,
+		pendingOpen: opts.OpenURL,
 	}
 }
 
@@ -124,6 +127,14 @@ func (m *Model) Init() tea.Cmd {
 	cmds = append(cmds, m.search.Init())
 	if m.cfg.Auth.AuthOnStartup {
 		cmds = append(cmds, m.authenticate())
+		// Defer open until auth completes
+		if m.pendingOpen != nil {
+			return tea.Batch(cmds...)
+		}
+	}
+	if m.pendingOpen != nil {
+		cmds = append(cmds, m.openParsedURL(m.pendingOpen))
+		m.pendingOpen = nil
 	}
 	if m.search.Query() != "" {
 		cmds = append(cmds, m.search.Refresh())
@@ -277,7 +288,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ViewSubs:
 			reloadCmd = m.subs.Load(true)
 		}
-		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), reloadCmd)
+		var openCmd tea.Cmd
+		if m.pendingOpen != nil {
+			openCmd = m.openParsedURL(m.pendingOpen)
+			m.pendingOpen = nil
+		}
+		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), reloadCmd, openCmd)
 
 	case authResultMsg:
 		m.authenticating = false
@@ -306,6 +322,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case ViewVideoTab:
 		if tab := m.activeTab(); tab != nil {
+			if vlm, ok := msg.(detail.VideoLoadedMsg); ok && vlm.Err == nil && vlm.Video != nil && tab.title == "" {
+				tab.title = vlm.Video.Title
+			}
 			var cmd tea.Cmd
 			tab.detail, cmd = tab.detail.Update(msg)
 			cmds = append(cmds, cmd)
@@ -355,6 +374,17 @@ func (m *Model) activeTab() *videoTab {
 }
 
 // openVideoTab opens a new video tab or switches to existing one for the same video.
+func (m *Model) openParsedURL(p *youtube.ParsedURL) tea.Cmd {
+	if p == nil {
+		return nil
+	}
+	switch p.Kind {
+	case youtube.URLVideo:
+		return m.openVideoTab(&youtube.Video{ID: p.ID})
+	}
+	return nil
+}
+
 func (m *Model) openVideoTab(v *youtube.Video) tea.Cmd {
 	// Check if already open
 	for i, tab := range m.videoTabs {
@@ -628,7 +658,11 @@ func (m *Model) renderTabs() string {
 
 	// Video tabs
 	for i, tab := range m.videoTabs {
-		label := fmt.Sprintf("[%d] %s", i+4, shared.Truncate(tab.title, 20))
+		title := tab.title
+		if title == "" {
+			title = "..."
+		}
+		label := fmt.Sprintf("[%d] %s", i+4, shared.Truncate(title, 20))
 		style := tabStyle
 		if m.activeView == ViewVideoTab && m.activeTabIdx == i {
 			style = activeTabStyle

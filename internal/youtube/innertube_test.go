@@ -164,3 +164,39 @@ func TestVideoURL(t *testing.T) {
 		t.Errorf("VideoURL = %q, want %q", got, want)
 	}
 }
+
+func TestParseYouTubeURL(t *testing.T) {
+	tests := []struct {
+		name string
+		input string
+		kind URLKind
+		id   string
+	}{
+		{"standard video", "https://www.youtube.com/watch?v=dQw4w9WgXcQ", URLVideo, "dQw4w9WgXcQ"},
+		{"video no www", "https://youtube.com/watch?v=abc123", URLVideo, "abc123"},
+		{"mobile video", "https://m.youtube.com/watch?v=abc123", URLVideo, "abc123"},
+		{"music video", "https://music.youtube.com/watch?v=abc123", URLVideo, "abc123"},
+		{"short URL", "https://youtu.be/dQw4w9WgXcQ", URLVideo, "dQw4w9WgXcQ"},
+		{"short URL no scheme", "youtu.be/dQw4w9WgXcQ", URLVideo, "dQw4w9WgXcQ"},
+		{"raw video ID", "dQw4w9WgXcQ", URLVideo, "dQw4w9WgXcQ"},
+		{"playlist", "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf", URLPlaylist, "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"},
+		{"music playlist", "https://music.youtube.com/playlist?list=OLAK5uy_test", URLPlaylist, "OLAK5uy_test"},
+		{"channel ID", "https://www.youtube.com/channel/UCxxxxxx", URLChannel, "UCxxxxxx"},
+		{"channel handle", "https://www.youtube.com/@TestChannel", URLChannel, "@TestChannel"},
+		{"video with extra params", "https://www.youtube.com/watch?v=abc123&t=120", URLVideo, "abc123"},
+		{"empty", "", URLUnknown, ""},
+		{"garbage URL", "https://example.com/something", URLUnknown, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseYouTubeURL(tt.input)
+			if got.Kind != tt.kind {
+				t.Errorf("Kind = %d, want %d", got.Kind, tt.kind)
+			}
+			if got.ID != tt.id {
+				t.Errorf("ID = %q, want %q", got.ID, tt.id)
+			}
+		})
+	}
+}

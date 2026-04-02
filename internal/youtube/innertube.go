@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	innertubego "github.com/nezbut/innertube-go"
 	"github.com/tidwall/gjson"
@@ -26,6 +28,89 @@ func PlaylistURL(id string) string {
 // MusicPlaylistURL returns a YouTube Music playlist URL for a playlist ID.
 func MusicPlaylistURL(id string) string {
 	return "https://music.youtube.com/playlist?list=" + id
+}
+
+// URLKind identifies the type of YouTube URL.
+type URLKind int
+
+const (
+	URLUnknown URLKind = iota
+	URLVideo
+	URLPlaylist
+	URLChannel
+)
+
+// ParsedURL holds the detected type and ID from a YouTube URL.
+type ParsedURL struct {
+	Kind URLKind
+	ID   string
+}
+
+// ParseYouTubeURL detects the type and extracts the ID from a YouTube URL.
+// If the input has no URL structure, it is treated as a raw video ID.
+func ParseYouTubeURL(raw string) ParsedURL {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ParsedURL{Kind: URLUnknown}
+	}
+
+	// No scheme or dots → raw video ID
+	if !strings.Contains(raw, ".") && !strings.Contains(raw, "/") {
+		return ParsedURL{Kind: URLVideo, ID: raw}
+	}
+
+	// Ensure scheme for url.Parse
+	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+		raw = "https://" + raw
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ParsedURL{Kind: URLUnknown}
+	}
+
+	host := strings.TrimPrefix(u.Hostname(), "www.")
+	host = strings.TrimPrefix(host, "m.")
+	host = strings.TrimPrefix(host, "music.")
+	path := strings.TrimSuffix(u.Path, "/")
+
+	switch host {
+	case "youtube.com":
+		// /watch?v=ID
+		if path == "/watch" {
+			if v := u.Query().Get("v"); v != "" {
+				return ParsedURL{Kind: URLVideo, ID: v}
+			}
+		}
+		// /playlist?list=ID
+		if path == "/playlist" {
+			if list := u.Query().Get("list"); list != "" {
+				return ParsedURL{Kind: URLPlaylist, ID: list}
+			}
+		}
+		// /channel/ID
+		if strings.HasPrefix(path, "/channel/") {
+			id := strings.TrimPrefix(path, "/channel/")
+			if id != "" {
+				return ParsedURL{Kind: URLChannel, ID: id}
+			}
+		}
+		// /@handle
+		if strings.HasPrefix(path, "/@") {
+			handle := strings.TrimPrefix(path, "/")
+			if handle != "" {
+				return ParsedURL{Kind: URLChannel, ID: handle}
+			}
+		}
+	case "youtu.be":
+		// youtu.be/ID
+		id := strings.TrimPrefix(path, "/")
+		if id != "" {
+			return ParsedURL{Kind: URLVideo, ID: id}
+		}
+	}
+
+	return ParsedURL{Kind: URLUnknown}
 }
 
 // InnerTubeClient implements Client using YouTube's InnerTube API.

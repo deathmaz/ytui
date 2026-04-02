@@ -15,6 +15,7 @@ import (
 func main() {
 	search := flag.String("search", "", "search query to execute on startup")
 	music := flag.Bool("music", false, "start in YouTube Music mode")
+	open := flag.String("open", "", "YouTube URL or video ID to open on startup")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -30,6 +31,12 @@ func main() {
 
 	opts := app.Options{
 		SearchQuery: *search,
+	}
+	if *open != "" {
+		parsed := youtube.ParseYouTubeURL(*open)
+		if parsed.Kind != youtube.URLUnknown {
+			opts.OpenURL = &parsed
+		}
 	}
 
 	var m tea.Model
