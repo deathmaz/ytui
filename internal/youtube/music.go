@@ -43,9 +43,14 @@ func getMusicBrowseTabs(data gjson.Result) gjson.Result {
 }
 
 // Search searches YouTube Music for the given query.
-func (c *MusicClient) Search(ctx context.Context, query string) (*MusicSearchResult, error) {
+// If continuation is non-empty, it fetches the next page of results.
+func (c *MusicClient) Search(ctx context.Context, query string, continuation string) (*MusicSearchResult, error) {
 	c.mu.Lock()
-	raw, err := c.it.Search(ctx, &query, nil, nil)
+	var cont *string
+	if continuation != "" {
+		cont = &continuation
+	}
+	raw, err := c.it.Search(ctx, &query, nil, cont)
 	c.mu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("music search: %w", err)
@@ -564,9 +569,9 @@ func parseMusicSearchResponse(raw map[string]interface{}) (*MusicSearchResult, e
 
 	result := &MusicSearchResult{}
 
+	// Initial response
 	sections := data.Get("contents.tabbedSearchResultsRenderer.tabs.0.tabRenderer.content.sectionListRenderer.contents")
 	sections.ForEach(func(_, section gjson.Result) bool {
-		// Top result card (artist/album)
 		card := section.Get("musicCardShelfRenderer")
 		if card.Exists() {
 			item := parseMusicCard(card)
@@ -574,7 +579,6 @@ func parseMusicSearchResponse(raw map[string]interface{}) (*MusicSearchResult, e
 			return true
 		}
 
-		// Shelf of results
 		shelf := section.Get("musicShelfRenderer")
 		if shelf.Exists() {
 			title := shelf.Get("title.runs.0.text").String()
@@ -591,8 +595,29 @@ func parseMusicSearchResponse(raw map[string]interface{}) (*MusicSearchResult, e
 				Items: items,
 			})
 		}
+
+		// Continuation token
+		ci := section.Get("continuationItemRenderer")
+		if ci.Exists() {
+			result.NextToken = extractContinuationToken(ci)
+		}
 		return true
 	})
+
+	// Continuation response
+	data.Get("continuationContents.musicShelfContinuation.contents").ForEach(func(_, entry gjson.Result) bool {
+		mrlir := entry.Get("musicResponsiveListItemRenderer")
+		if mrlir.Exists() {
+			result.Shelves = append(result.Shelves, MusicShelf{
+				Items: []MusicItem{parseMusicListItem(mrlir)},
+			})
+		}
+		return true
+	})
+	ct := data.Get("continuationContents.musicShelfContinuation.continuations.0.nextContinuationData.continuation").String()
+	if ct != "" {
+		result.NextToken = ct
+	}
 
 	return result, nil
 }

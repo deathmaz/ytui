@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -11,8 +12,10 @@ func testConfig() Config {
 	return Config{
 		Placeholder: "Test...",
 		Delegate:    list.NewDefaultDelegate(),
-		SearchFn:    func(query, pageToken string) tea.Cmd { return nil },
-		SelectFn:    func(item list.Item) tea.Cmd { return nil },
+		SearchFn: func(_ context.Context, _, _ string) SearchResult {
+			return SearchResult{}
+		},
+		SelectFn: func(_ list.Item) tea.Msg { return nil },
 	}
 }
 

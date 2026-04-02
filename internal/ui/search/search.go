@@ -1,6 +1,8 @@
 package search
 
 import (
+	"context"
+
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -20,20 +22,28 @@ const (
 	focusList
 )
 
-// SearchFunc performs a search and returns a ResultMsg.
-// query is the search text. If pageToken is non-empty, it's a "load more" request.
-type SearchFunc func(query, pageToken string) tea.Cmd
-
-// SelectFunc is called when Enter is pressed on a result item.
-// It should return a tea.Cmd that emits the appropriate selection message.
-type SelectFunc func(item list.Item) tea.Cmd
-
-// ResultMsg carries search results back to the model.
-type ResultMsg struct {
+// SearchResult is the concrete return type for search operations.
+// Callers must populate Items and NextToken — the compiler enforces
+// that these fields exist even if empty.
+type SearchResult struct {
 	Items     []list.Item
 	NextToken string
-	Append    bool // true when loading more results
 	Err       error
+}
+
+// SearchFunc performs a search. The search model calls this in a goroutine
+// and converts the result into an internal message. Callers cannot return
+// an arbitrary tea.Msg — they must return a SearchResult.
+type SearchFunc func(ctx context.Context, query, pageToken string) SearchResult
+
+// SelectFunc is called synchronously when Enter is pressed on a result.
+// Returns the message to emit, or nil for no action.
+type SelectFunc func(item list.Item) tea.Msg
+
+// resultMsg is internal — only created by the search model from SearchResult.
+type resultMsg struct {
+	result SearchResult
+	append bool
 }
 
 // Config holds the parameters that differ between search instances.
@@ -63,6 +73,10 @@ type Model struct {
 
 // New creates a new search model with the given configuration.
 func New(cfg Config) Model {
+	if cfg.SearchFn == nil {
+		panic("search.Config.SearchFn must not be nil")
+	}
+
 	ti := textinput.New()
 	ti.Placeholder = cfg.Placeholder
 	ti.CharLimit = 256
@@ -130,7 +144,7 @@ func (m *Model) Refresh() tea.Cmd {
 	m.searching = true
 	m.results.SetItems(nil)
 	m.results.ResetSelected()
-	return tea.Batch(m.spinner.Tick, m.searchFn(m.query, ""))
+	return tea.Batch(m.spinner.Tick, m.searchCmd(m.query, "", false))
 }
 
 // SelectedItem returns the currently selected list item.
@@ -175,34 +189,37 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.input.Blur()
 			m.results.SetItems(nil)
 			m.results.ResetSelected()
-			return m, tea.Batch(m.spinner.Tick, m.searchFn(query, ""))
+			return m, tea.Batch(m.spinner.Tick, m.searchCmd(query, "", false))
 
 		case key.Matches(msg, m.keys.Submit) && m.focused == focusList:
 			if item := m.results.SelectedItem(); item != nil && m.selectFn != nil {
-				return m, m.selectFn(item)
+				selMsg := m.selectFn(item)
+				if selMsg != nil {
+					return m, func() tea.Msg { return selMsg }
+				}
 			}
 
 		case key.Matches(msg, m.keys.LoadMore) && m.focused == focusList:
 			return m, m.loadMore()
 		}
 
-	case ResultMsg:
+	case resultMsg:
 		m.searching = false
 		m.loadingMore = false
-		if msg.Err != nil {
+		if msg.result.Err != nil {
 			return m, nil
 		}
-		m.nextToken = msg.NextToken
+		m.nextToken = msg.result.NextToken
 
-		if msg.Append {
+		if msg.append {
 			existing := m.results.Items()
-			items := make([]list.Item, len(existing), len(existing)+len(msg.Items))
+			items := make([]list.Item, len(existing), len(existing)+len(msg.result.Items))
 			copy(items, existing)
-			items = append(items, msg.Items...)
+			items = append(items, msg.result.Items...)
 			cmd := m.results.SetItems(items)
 			cmds = append(cmds, cmd)
 		} else {
-			cmd := m.results.SetItems(msg.Items)
+			cmd := m.results.SetItems(msg.result.Items)
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
@@ -252,10 +269,19 @@ func (m Model) View() string {
 	)
 }
 
+// searchCmd wraps SearchFunc into a tea.Cmd with the internal resultMsg.
+func (m *Model) searchCmd(query, pageToken string, isAppend bool) tea.Cmd {
+	fn := m.searchFn
+	return func() tea.Msg {
+		result := fn(context.Background(), query, pageToken)
+		return resultMsg{result: result, append: isAppend}
+	}
+}
+
 func (m *Model) loadMore() tea.Cmd {
 	if m.loadingMore || m.searching || m.nextToken == "" || m.query == "" {
 		return nil
 	}
 	m.loadingMore = true
-	return tea.Batch(m.spinner.Tick, m.searchFn(m.query, m.nextToken))
+	return tea.Batch(m.spinner.Tick, m.searchCmd(m.query, m.nextToken, true))
 }

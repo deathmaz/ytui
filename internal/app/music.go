@@ -1322,29 +1322,28 @@ func newMusicSearchConfig(client *youtube.MusicClient) search.Config {
 	return search.Config{
 		Placeholder: "Search YouTube Music...",
 		Delegate:    musicDelegate{},
-		SearchFn: func(query, _ string) tea.Cmd {
-			return func() tea.Msg {
-				result, err := client.Search(context.Background(), query)
-				if err != nil {
-					return search.ResultMsg{Err: err}
+		SearchFn: func(ctx context.Context, query, pageToken string) search.SearchResult {
+			result, err := client.Search(ctx, query, pageToken)
+			if err != nil {
+				return search.SearchResult{Err: err}
+			}
+			var items []list.Item
+			if result.TopResult != nil {
+				items = append(items, musicItem{item: *result.TopResult})
+			}
+			for _, shelf := range result.Shelves {
+				for _, it := range shelf.Items {
+					items = append(items, musicItem{item: it})
 				}
-				var items []list.Item
-				if result.TopResult != nil {
-					items = append(items, musicItem{item: *result.TopResult})
-				}
-				for _, shelf := range result.Shelves {
-					for _, it := range shelf.Items {
-						items = append(items, musicItem{item: it})
-					}
-				}
-				return search.ResultMsg{Items: items}
+			}
+			return search.SearchResult{
+				Items:     items,
+				NextToken: result.NextToken,
 			}
 		},
-		SelectFn: func(item list.Item) tea.Cmd {
+		SelectFn: func(item list.Item) tea.Msg {
 			if mi, ok := item.(musicItem); ok {
-				return func() tea.Msg {
-					return musicItemSelectedMsg{item: mi.item}
-				}
+				return musicItemSelectedMsg{item: mi.item}
 			}
 			return nil
 		},

@@ -33,6 +33,7 @@ type MusicShelf struct {
 type MusicSearchResult struct {
 	TopResult *MusicItem    // from musicCardShelfRenderer (artist/album card)
 	Shelves   []MusicShelf  // from musicShelfRenderer sections
+	NextToken string        // continuation token for pagination
 }
 
 // MusicArtistPage holds data for an artist page.

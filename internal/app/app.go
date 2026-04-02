@@ -655,28 +655,23 @@ func newVideoSearchConfig(client youtube.Client) search.Config {
 	return search.Config{
 		Placeholder: "Search YouTube...",
 		Delegate:    shared.VideoDelegate{},
-		SearchFn: func(query, pageToken string) tea.Cmd {
-			return func() tea.Msg {
-				page, err := client.Search(context.Background(), query, pageToken)
-				if err != nil {
-					return search.ResultMsg{Err: err}
-				}
-				var items []list.Item
-				for _, v := range page.Items {
-					items = append(items, shared.VideoItem{Video: v})
-				}
-				return search.ResultMsg{
-					Items:     items,
-					NextToken: page.NextToken,
-					Append:    pageToken != "",
-				}
+		SearchFn: func(ctx context.Context, query, pageToken string) search.SearchResult {
+			page, err := client.Search(ctx, query, pageToken)
+			if err != nil {
+				return search.SearchResult{Err: err}
+			}
+			var items []list.Item
+			for _, v := range page.Items {
+				items = append(items, shared.VideoItem{Video: v})
+			}
+			return search.SearchResult{
+				Items:     items,
+				NextToken: page.NextToken,
 			}
 		},
-		SelectFn: func(item list.Item) tea.Cmd {
+		SelectFn: func(item list.Item) tea.Msg {
 			if vi, ok := item.(shared.VideoItem); ok {
-				return func() tea.Msg {
-					return shared.VideoSelectedMsg{Video: vi.Video}
-				}
+				return shared.VideoSelectedMsg{Video: vi.Video}
 			}
 			return nil
 		},
