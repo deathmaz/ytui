@@ -135,6 +135,22 @@ auth_on_startup = false            # auto-authenticate on launch (default: false
 mode = "video"                     # "video" (default) or "music" for YouTube Music mode
 ```
 
+## Testing
+
+All tests use mock clients — no real YouTube API calls are made.
+
+```sh
+go test ./...                                    # run all tests
+go test ./internal/app/ -v                       # run app tests (integration + golden + unit)
+go test ./internal/app/ -run TestGolden -update  # regenerate golden files after intentional UI changes
+```
+
+### Test types
+
+- **Golden file tests** (`internal/app/golden_test.go`) — Run the real Bubble Tea program with mock data via [teatest](https://github.com/charmbracelet/x/tree/main/exp/teatest). Capture rendered terminal output and compare against golden files in `internal/app/testdata/`. Covers every screen state in both video and music modes: search, feed, subs, detail (info + comments), home, library, artist pages, album pages, modals, help, status messages, sub-tab switching, and multi-tab layouts.
+- **Integration tests** (`internal/app/integration_test.go`) — Run the real Bubble Tea program and verify behavioral correctness: auth flow only reloads active view, tab switching triggers loading, global keys behave the same in both modes, tab open/close lifecycle, status message lifecycle.
+- **Unit tests** — Parser tests (`internal/youtube/`), config loading, auth transport, image encoding, download parsing, shared UI components.
+
 ## Authentication
 
 ytui extracts YouTube session cookies from your browser to access subscriptions and feed. Cookies are held in memory only -- never written to disk.

@@ -141,7 +141,7 @@ type MusicModel struct {
 	height       int
 	keys         KeyMap
 	help         help.Model
-	client       *youtube.MusicClient
+	client       youtube.MusicAPI
 	ytClient     youtube.Client
 	cfg          *config.Config
 	imgR         *ytimage.Renderer
@@ -175,7 +175,7 @@ type MusicModel struct {
 }
 
 // NewMusic creates a new root model for music mode.
-func NewMusic(client *youtube.MusicClient, ytClient youtube.Client, cfg *config.Config, imgR *ytimage.Renderer, opts Options) *MusicModel {
+func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Config, imgR *ytimage.Renderer, opts Options) *MusicModel {
 	h := help.New()
 	h.ShortSeparator = "  "
 
@@ -684,7 +684,7 @@ func (m *MusicModel) loadLibrary() tea.Cmd {
 		return nil
 	}
 	if !m.client.IsAuthenticated() {
-		return m.setStatus("Press 'a' to authenticate first", 3*time.Second)
+		return nil
 	}
 	m.libraryLoading = true
 
@@ -1315,7 +1315,7 @@ type musicItemSelectedMsg struct {
 	item youtube.MusicItem
 }
 
-func newMusicSearchConfig(client *youtube.MusicClient) search.Config {
+func newMusicSearchConfig(client youtube.MusicAPI) search.Config {
 	return search.Config{
 		Placeholder: "Search YouTube Music...",
 		Delegate:    musicDelegate{},
