@@ -295,13 +295,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				switch {
 				case key.Matches(msg, downKey):
 					m.moveCommentCursor(1)
-					return m, nil
+					return m, m.autoLoadComments()
 				case key.Matches(msg, upKey):
 					m.moveCommentCursor(-1)
 					return m, nil
 				case key.Matches(msg, pageDownKey):
 					m.moveCommentCursor(5)
-					return m, nil
+					return m, m.autoLoadComments()
 				case key.Matches(msg, pageUpKey):
 					m.moveCommentCursor(-5)
 					return m, nil
@@ -310,7 +310,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return m, nil
 				case key.Matches(msg, goBottomKey):
 					m.moveCommentCursor(m.totalCommentItems())
-					return m, nil
+					return m, m.autoLoadComments()
 				case key.Matches(msg, expandKey):
 					return m, m.expandAtCursor()
 				case key.Matches(msg, collapseKey):
@@ -404,6 +404,14 @@ func (m *Model) cursorThreadIndex() int {
 		pos = threadEnd
 	}
 	return -1
+}
+
+func (m *Model) autoLoadComments() tea.Cmd {
+	total := m.totalCommentItems()
+	if total > 0 && m.commentCursor >= total-5 {
+		return m.loadMoreComments()
+	}
+	return nil
 }
 
 func (m *Model) totalCommentItems() int {

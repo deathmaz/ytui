@@ -505,13 +505,17 @@ func parseChannelSections(sections gjson.Result, channels *[]Channel, nextToken 
 	})
 }
 
-func (c *InnerTubeClient) GetFeed(ctx context.Context) (*Page[Video], error) {
+func (c *InnerTubeClient) GetFeed(ctx context.Context, pageToken string) (*Page[Video], error) {
 	if !c.authenticated {
 		return nil, fmt.Errorf("authentication required for subscription feed")
 	}
 
 	browseID := "FEsubscriptions"
-	raw, err := c.it.Browse(ctx, &browseID, nil, nil)
+	var cont *string
+	if pageToken != "" {
+		cont = &pageToken
+	}
+	raw, err := c.it.Browse(ctx, &browseID, nil, cont)
 	if err != nil {
 		return nil, fmt.Errorf("innertube browse subscriptions: %w", err)
 	}
@@ -524,7 +528,7 @@ func (c *InnerTubeClient) GetFeed(ctx context.Context) (*Page[Video], error) {
 	var videos []Video
 	var nextToken string
 
-	// Navigate to the selected tab's richGridRenderer
+	// Navigate to the selected tab's richGridRenderer (initial load)
 	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
 	tabs.ForEach(func(_, tab gjson.Result) bool {
 		tr := tab.Get("tabRenderer")
@@ -532,34 +536,49 @@ func (c *InnerTubeClient) GetFeed(ctx context.Context) (*Page[Video], error) {
 			return true
 		}
 		contents := tr.Get("content.richGridRenderer.contents")
-		contents.ForEach(func(_, item gjson.Result) bool {
-			// Classic videoRenderer
-			vr := item.Get("richItemRenderer.content.videoRenderer")
-			if vr.Exists() {
-				videos = append(videos, parseVideoRenderer(vr))
-				return true
-			}
-			// New lockupViewModel format
-			lvm := item.Get("richItemRenderer.content.lockupViewModel")
-			if lvm.Exists() {
-				videos = append(videos, parseLockupViewModel(lvm))
-				return true
-			}
-			// Continuation token
-			token := item.Get("continuationItemRenderer.continuationEndpoint.continuationCommand.token")
-			if token.Exists() {
-				nextToken = token.String()
+		parseFeedItems(contents, &videos, &nextToken)
+		return false // stop after selected tab
+	})
+
+	// Continuation response
+	if len(videos) == 0 {
+		data.Get("onResponseReceivedActions").ForEach(func(_, action gjson.Result) bool {
+			items := action.Get("appendContinuationItemsAction.continuationItems")
+			if items.Exists() {
+				parseFeedItems(items, &videos, &nextToken)
 			}
 			return true
 		})
-		return false // stop after selected tab
-	})
+	}
 
 	return &Page[Video]{
 		Items:     videos,
 		NextToken: nextToken,
 		HasMore:   nextToken != "",
 	}, nil
+}
+
+func parseFeedItems(contents gjson.Result, videos *[]Video, nextToken *string) {
+	contents.ForEach(func(_, item gjson.Result) bool {
+		// Classic videoRenderer
+		vr := item.Get("richItemRenderer.content.videoRenderer")
+		if vr.Exists() {
+			*videos = append(*videos, parseVideoRenderer(vr))
+			return true
+		}
+		// New lockupViewModel format
+		lvm := item.Get("richItemRenderer.content.lockupViewModel")
+		if lvm.Exists() {
+			*videos = append(*videos, parseLockupViewModel(lvm))
+			return true
+		}
+		// Continuation token
+		token := item.Get("continuationItemRenderer.continuationEndpoint.continuationCommand.token")
+		if token.Exists() {
+			*nextToken = token.String()
+		}
+		return true
+	})
 }
 
 func (c *InnerTubeClient) GetChannelVideos(ctx context.Context, channelID string, pageToken string) (*Page[Video], error) {

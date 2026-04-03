@@ -242,9 +242,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.results, cmd = m.results.Update(msg)
 		cmds = append(cmds, cmd)
 
-		// Auto-load more when near the bottom
-		total := len(m.results.Items())
-		if total > 0 && m.results.Index() >= total-5 {
+		if shared.ShouldLoadMore(m.results, 5) {
 			cmds = append(cmds, m.loadMore())
 		}
 	}

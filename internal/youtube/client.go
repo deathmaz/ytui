@@ -20,7 +20,7 @@ type Client interface {
 	GetSubscriptions(ctx context.Context, pageToken string) (*Page[Channel], error)
 
 	// GetFeed returns the authenticated user's subscription feed.
-	GetFeed(ctx context.Context) (*Page[Video], error)
+	GetFeed(ctx context.Context, pageToken string) (*Page[Video], error)
 
 	// GetChannelVideos returns videos from a channel.
 	GetChannelVideos(ctx context.Context, channelID string, pageToken string) (*Page[Video], error)

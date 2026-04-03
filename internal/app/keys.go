@@ -28,6 +28,13 @@ type KeyMap struct {
 	Yank       key.Binding
 	Refresh    key.Binding
 	Auth       key.Binding
+
+	// Music-specific bindings
+	PlayAlbum key.Binding
+	Enter     key.Binding
+	NextTab   key.Binding
+	PrevTab   key.Binding
+	LoadMore  key.Binding
 }
 
 // DefaultKeyMap returns the default vim-like keybindings.
@@ -57,6 +64,12 @@ func DefaultKeyMap() KeyMap {
 		Yank:       key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Refresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Auth:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "authenticate")),
+
+		PlayAlbum: key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "play album")),
+		Enter:     key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+		NextTab:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next section")),
+		PrevTab:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "prev section")),
+		LoadMore:  key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "load all")),
 	}
 }
 
@@ -74,3 +87,19 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Open, k.Yank, k.Refresh, k.Auth, k.Quit},
 	}
 }
+
+// MusicShortHelp returns the compact help bindings for music mode.
+func (k KeyMap) MusicShortHelp() []key.Binding {
+	return []key.Binding{k.Search, k.Play, k.PlayAlbum, k.Enter, k.NextTab, k.LoadMore, k.Auth, k.OpenURL, k.Back, k.Quit}
+}
+
+// MusicFullHelp returns the extended help bindings for music mode.
+func (k KeyMap) MusicFullHelp() [][]key.Binding {
+	return [][]key.Binding{k.MusicShortHelp()}
+}
+
+// musicHelpAdapter wraps KeyMap to satisfy help.KeyMap with music-specific bindings.
+type musicHelpAdapter struct{ KeyMap }
+
+func (a musicHelpAdapter) ShortHelp() []key.Binding  { return a.KeyMap.MusicShortHelp() }
+func (a musicHelpAdapter) FullHelp() [][]key.Binding { return a.KeyMap.MusicFullHelp() }

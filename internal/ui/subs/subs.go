@@ -19,8 +19,10 @@ var selectKey = key.NewBinding(key.WithKeys("enter"))
 
 // SubsLoadedMsg carries subscription channel results.
 type SubsLoadedMsg struct {
-	Channels []youtube.Channel
-	Err      error
+	Channels  []youtube.Channel
+	NextToken string
+	Append    bool
+	Err       error
 }
 
 // ChannelSelectedMsg is emitted when a user selects a channel.
@@ -76,14 +78,16 @@ func (d channelDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 // Model is the subscriptions list view.
 type Model struct {
-	list    list.Model
-	spinner spinner.Model
-	loading bool
-	loaded  bool
-	err     error
-	width   int
-	height  int
-	client  youtube.Client
+	list        list.Model
+	spinner     spinner.Model
+	loading     bool
+	loaded      bool
+	loadingMore bool
+	nextToken   string
+	err         error
+	width       int
+	height      int
+	client      youtube.Client
 }
 
 // New creates a new subs view model.
@@ -113,6 +117,7 @@ func (m *Model) Load(force bool) tea.Cmd {
 		return nil
 	}
 	m.loading = true
+	m.nextToken = ""
 	client := m.client
 	return tea.Batch(m.spinner.Tick, func() (msg tea.Msg) {
 		defer func() {
@@ -120,22 +125,33 @@ func (m *Model) Load(force bool) tea.Cmd {
 				msg = SubsLoadedMsg{Err: fmt.Errorf("panic: %v", r)}
 			}
 		}()
-		// Fetch all pages
-		var allChannels []youtube.Channel
-		pageToken := ""
-		for {
-			page, err := client.GetSubscriptions(context.Background(), pageToken)
-			if err != nil {
-				return SubsLoadedMsg{Err: err}
-			}
-			allChannels = append(allChannels, page.Items...)
-			if !page.HasMore {
-				break
-			}
-			pageToken = page.NextToken
+		page, err := client.GetSubscriptions(context.Background(), "")
+		if err != nil {
+			return SubsLoadedMsg{Err: err}
 		}
-		return SubsLoadedMsg{Channels: allChannels}
+		return SubsLoadedMsg{Channels: page.Items, NextToken: page.NextToken}
 	})
+}
+
+func (m *Model) loadMore() tea.Cmd {
+	if m.loadingMore || m.loading || m.nextToken == "" {
+		return nil
+	}
+	m.loadingMore = true
+	token := m.nextToken
+	client := m.client
+	return func() (msg tea.Msg) {
+		defer func() {
+			if r := recover(); r != nil {
+				msg = SubsLoadedMsg{Err: fmt.Errorf("panic: %v", r)}
+			}
+		}()
+		page, err := client.GetSubscriptions(context.Background(), token)
+		if err != nil {
+			return SubsLoadedMsg{Err: err}
+		}
+		return SubsLoadedMsg{Channels: page.Items, NextToken: page.NextToken, Append: true}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -144,18 +160,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case SubsLoadedMsg:
 		m.loading = false
-		m.loaded = true
+		m.loadingMore = false
 		if msg.Err != nil {
 			m.err = msg.Err
 			return m, nil
 		}
 		m.err = nil
-		items := make([]list.Item, len(msg.Channels))
-		for i, ch := range msg.Channels {
-			items[i] = channelItem{channel: ch}
+		m.loaded = true
+		m.nextToken = msg.NextToken
+
+		var newItems []list.Item
+		for _, ch := range msg.Channels {
+			newItems = append(newItems, channelItem{channel: ch})
 		}
-		cmd := m.list.SetItems(items)
-		cmds = append(cmds, cmd)
+		if msg.Append {
+			existing := m.list.Items()
+			items := make([]list.Item, len(existing), len(existing)+len(newItems))
+			copy(items, existing)
+			items = append(items, newItems...)
+			cmd := m.list.SetItems(items)
+			cmds = append(cmds, cmd)
+		} else {
+			cmd := m.list.SetItems(newItems)
+			cmds = append(cmds, cmd)
+		}
 		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
@@ -170,6 +198,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.list, cmd = m.list.Update(msg)
 			cmds = append(cmds, cmd)
+
+			if shared.ShouldLoadMore(m.list, 5) {
+				cmds = append(cmds, m.loadMore())
+			}
 		}
 
 	case spinner.TickMsg:

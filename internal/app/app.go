@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/deathmaz/ytui/internal/auth"
 	"github.com/deathmaz/ytui/internal/config"
 	"github.com/deathmaz/ytui/internal/download"
 	ytimage "github.com/deathmaz/ytui/internal/image"
@@ -44,8 +44,6 @@ type formatsLoadedMsg struct {
 }
 type downloadResultMsg struct{ result download.Result }
 type clearStatusMsg struct{ seq int }
-type authResultMsg struct{ err error }
-type authSuccessMsg struct{ client youtube.Client }
 
 const maxVideoTabs = 6
 
@@ -72,13 +70,11 @@ type Model struct {
 	picker        picker.Model
 	urlInput      urlinput.Model
 	cfg           *config.Config
-	videoTabs     []videoTab
-	activeTabIdx  int // index into videoTabs for current video tab
+	videoTabs TabSet[videoTab]
 
 	pendingVideoURL string
 	pendingOpen     *youtube.ParsedURL
-	statusMsg       string
-	statusSeq       int
+	status          StatusManager
 	downloading     bool
 	authenticating  bool
 }
@@ -110,6 +106,7 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 		picker:      picker.New(),
 		urlInput:    urlinput.New(),
 		cfg:         cfg,
+		videoTabs:   NewTabSet[videoTab](maxVideoTabs, func(t *videoTab) string { return t.videoID }),
 		pendingOpen: opts.OpenURL,
 	}
 }
@@ -139,9 +136,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.help.Width = msg.Width
+		HandleWindowSize(msg, &m.width, &m.height, &m.help)
 		m.resizeViews()
 
 	case tea.KeyMsg:
@@ -156,43 +151,48 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		if key.Matches(msg, m.keys.ForceQuit) {
-			return m, tea.Quit
-		}
-
 		if searchFocusedCmd, ok := handleSearchFocused(msg, &m.search, m.activeView == ViewSearch, m.keys); ok {
 			return m, searchFocusedCmd
+		}
+
+		// Shared global keys
+		if action, ok := HandleGlobalKey(msg, m.keys); ok {
+			switch action {
+			case KeyQuit:
+				return m, tea.Quit
+			case KeyHelpToggle:
+				m.help.ShowAll = !m.help.ShowAll
+				return m, nil
+			case KeyAuth:
+				return m, m.authenticate()
+			case KeyOpenURL:
+				return m, m.urlInput.Show(m.width, m.height)
+			case KeySearch:
+				m.switchTo(ViewSearch)
+				m.search.Focus()
+				return m, nil
+			}
 		}
 
 		// Esc handling
 		if key.Matches(msg, m.keys.Back) {
 			if m.activeView == ViewVideoTab {
 				m.closeActiveVideoTab()
-				if len(m.videoTabs) > 0 {
-					m.activeTabIdx = len(m.videoTabs) - 1
-				} else {
+				if m.videoTabs.Len() == 0 {
 					m.activeView = ViewSearch
 				}
 				return m, nil
 			}
 		}
 
+		// Video-specific keys
 		switch {
-			case key.Matches(msg, m.keys.Quit):
-				return m, tea.Quit
-			case key.Matches(msg, m.keys.Help):
-				m.help.ShowAll = !m.help.ShowAll
-				return m, nil
 			case key.Matches(msg, m.keys.Feed):
 				m.switchTo(ViewFeed)
 				return m, m.feed.Load(false)
 			case key.Matches(msg, m.keys.Subs):
 				m.switchTo(ViewSubs)
 				return m, m.subs.Load(false)
-			case key.Matches(msg, m.keys.Search):
-				m.switchTo(ViewSearch)
-				m.search.Focus()
-				return m, nil
 			case key.Matches(msg, m.keys.Detail):
 				return m, m.openDetail()
 			case key.Matches(msg, m.keys.Play):
@@ -201,12 +201,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.fetchFormatsAndPlay()
 			case key.Matches(msg, m.keys.Download):
 				return m, m.startDownload()
-			case key.Matches(msg, m.keys.Auth):
-				return m, m.authenticate()
 			case key.Matches(msg, m.keys.Open):
 				return m, m.openInBrowser()
-			case key.Matches(msg, m.keys.OpenURL):
-				return m, m.urlInput.Show(m.width, m.height)
 			case key.Matches(msg, m.keys.Yank):
 				return m, m.copyURL()
 			case key.Matches(msg, m.keys.Refresh):
@@ -216,9 +212,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Video tab number keys (4-9)
 		if k := msg.String(); len(k) == 1 && k[0] >= '4' && k[0] <= '9' {
 			idx := int(k[0] - '4')
-			if idx < len(m.videoTabs) {
+			if idx < m.videoTabs.Len() {
 				m.activeView = ViewVideoTab
-				m.activeTabIdx = idx
+				m.videoTabs.SetActive(idx)
 				return m, nil
 			}
 		}
@@ -273,28 +269,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.setStatus("Downloaded: "+msg.result.Title, 5*time.Second)
 
-	case authSuccessMsg:
-		m.authenticating = false
-		m.ytClient = msg.client
-		m.search = search.New(newVideoSearchConfig(msg.client))
-		m.feed = feed.New(msg.client)
-		m.subs = subs.New(msg.client)
-		m.resizeViews()
-		feedCmd := m.feed.Load(true)
-		subsCmd := m.subs.Load(true)
-		var openCmd tea.Cmd
-		if m.pendingOpen != nil {
-			openCmd = m.openParsedURL(m.pendingOpen)
-			m.pendingOpen = nil
-		}
-		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), feedCmd, subsCmd, openCmd)
-
-	case authResultMsg:
-		m.authenticating = false
-		return m, m.setStatus("Auth failed: "+msg.err.Error(), 5*time.Second)
+	case AuthResult:
+		return m, HandleAuthResult(msg, &m.authenticating, &m.status, m.cfg.Auth.Browser,
+			&m.pendingOpen, m.openParsedURL,
+			func(httpClient *http.Client) error {
+				newClient, err := youtube.NewInnerTubeClient(httpClient)
+				if err != nil {
+					return err
+				}
+				m.ytClient = newClient
+				m.search = search.New(newVideoSearchConfig(newClient))
+				m.feed = feed.New(newClient)
+				m.subs = subs.New(newClient)
+				return nil
+			},
+			func() tea.Cmd {
+				switch m.activeView {
+				case ViewFeed:
+					return m.feed.Load(true)
+				case ViewSubs:
+					return m.subs.Load(true)
+				}
+				return nil
+			},
+			m.resizeViews,
+		)
 
 	case clearStatusMsg:
-		if handleClearStatus(msg, m.statusSeq, &m.statusMsg) {
+		if m.status.HandleClear(msg) {
 			m.resizeViews()
 		}
 	}
@@ -328,28 +330,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) View() string {
-	if m.width == 0 {
-		return "Loading..."
-	}
-
-	if m.urlInput.IsActive() {
-		return m.urlInput.View()
-	}
-
-	if m.picker.IsActive() {
-		return m.picker.View()
-	}
-
 	var statusLine string
-	if m.statusMsg != "" {
-		statusLine = styles.Accent.Render(m.statusMsg)
+	if m.status.Msg != "" {
+		statusLine = styles.Accent.Render(m.status.Msg)
 	} else if m.downloading {
 		statusLine = styles.Dim.Render("Downloading...")
 	}
 
-	return composeSections(
-		m.renderTabs(),
-		m.renderContent(),
+	return RenderShell(
+		m.width,
+		[]ModalView{&m.urlInput, &m.picker},
+		m.renderTabs,
+		m.renderContent,
 		statusLine,
 		statusBarStyle.Render(m.help.View(m.keys)),
 	)
@@ -357,10 +349,10 @@ func (m *Model) View() string {
 
 // activeTab returns the currently active video tab, or nil.
 func (m *Model) activeTab() *videoTab {
-	if m.activeView != ViewVideoTab || m.activeTabIdx >= len(m.videoTabs) {
+	if m.activeView != ViewVideoTab {
 		return nil
 	}
-	return &m.videoTabs[m.activeTabIdx]
+	return m.videoTabs.Active()
 }
 
 // openVideoTab opens a new video tab or switches to existing one for the same video.
@@ -377,41 +369,34 @@ func (m *Model) openParsedURL(p *youtube.ParsedURL) tea.Cmd {
 
 func (m *Model) openVideoTab(v *youtube.Video) tea.Cmd {
 	// Check if already open
-	for i, tab := range m.videoTabs {
-		if tab.videoID == v.ID {
-			m.activeView = ViewVideoTab
-			m.activeTabIdx = i
-			return nil
-		}
-	}
-
-	// Create new tab
-	if len(m.videoTabs) >= maxVideoTabs {
-		return m.setStatus("Max video tabs reached (close one with Esc)", 3*time.Second)
+	if idx, found := m.videoTabs.Find(v.ID); found {
+		m.activeView = ViewVideoTab
+		m.videoTabs.SetActive(idx)
+		return nil
 	}
 
 	d := detail.New(m.ytClient, m.imgR)
 	d.SetSize(m.width, m.contentHeight())
 
-	m.videoTabs = append(m.videoTabs, videoTab{
+	idx, err := m.videoTabs.Open(videoTab{
 		videoID: v.ID,
 		title:   v.Title,
 		detail:  d,
 	})
-	m.activeTabIdx = len(m.videoTabs) - 1
+	if err != nil {
+		return m.setStatus("Max video tabs reached (close one with Esc)", 3*time.Second)
+	}
+	m.videoTabs.SetActive(idx)
 	m.activeView = ViewVideoTab
-	return m.videoTabs[m.activeTabIdx].detail.LoadVideo(v.ID)
+	return m.videoTabs.Active().detail.LoadVideo(v.ID)
 }
 
 // closeActiveVideoTab closes the current video tab.
 func (m *Model) closeActiveVideoTab() {
-	if m.activeView != ViewVideoTab || len(m.videoTabs) == 0 {
+	if m.activeView != ViewVideoTab || m.videoTabs.Len() == 0 {
 		return
 	}
-	m.videoTabs = append(m.videoTabs[:m.activeTabIdx], m.videoTabs[m.activeTabIdx+1:]...)
-	if m.activeTabIdx >= len(m.videoTabs) {
-		m.activeTabIdx = len(m.videoTabs) - 1
-	}
+	m.videoTabs.Close(m.videoTabs.ActiveIdx())
 }
 
 func (m *Model) switchTo(v View) {
@@ -480,7 +465,7 @@ func (m *Model) startDownload() tea.Cmd {
 		return nil
 	}
 	m.downloading = true
-	m.statusMsg = "Downloading: " + v.Title
+	m.status.SetPermanent("Downloading: " + v.Title)
 	url := v.URL
 	dlCfg := m.cfg.Download
 	return func() tea.Msg {
@@ -490,32 +475,17 @@ func (m *Model) startDownload() tea.Cmd {
 }
 
 func (m *Model) setStatus(msg string, clearAfter time.Duration) tea.Cmd {
-	cmd := setStatusCmd(&m.statusSeq, &m.statusMsg, msg, clearAfter)
+	cmd := m.status.Set(msg, clearAfter)
 	m.resizeViews()
 	return cmd
 }
 
 func (m *Model) authenticate() tea.Cmd {
-	if m.authenticating {
-		return nil
+	cmd := TryAuthenticate(&m.authenticating, m.ytClient.IsAuthenticated(), &m.status, m.cfg.Auth.Browser)
+	if cmd != nil {
+		m.resizeViews()
 	}
-	if m.ytClient.IsAuthenticated() {
-		return m.setStatus("Already authenticated", 3*time.Second)
-	}
-	m.authenticating = true
-	m.statusMsg = "Authenticating via " + m.cfg.Auth.Browser + "..."
-	return func() tea.Msg {
-		jar, err := auth.ExtractCookies(context.Background(), m.cfg.Auth.Browser)
-		if err != nil {
-			return authResultMsg{err: err}
-		}
-		httpClient := auth.HTTPClient(jar)
-		newClient, err := youtube.NewInnerTubeClient(httpClient)
-		if err != nil {
-			return authResultMsg{err: err}
-		}
-		return authSuccessMsg{client: newClient}
-	}
+	return cmd
 }
 
 func (m *Model) openInBrowser() tea.Cmd {
@@ -597,7 +567,7 @@ func playVideoCmd(url, format, playerCmd string, playerArgs []string) tea.Cmd {
 func (m *Model) contentHeight() int {
 	return calcContentHeight(m.height, m.renderTabs(),
 		statusBarStyle.Render(m.help.View(m.keys)),
-		m.statusMsg != "" || m.downloading)
+		m.status.Msg != "" || m.downloading)
 }
 
 func (m *Model) resizeViews() {
@@ -608,8 +578,8 @@ func (m *Model) resizeViews() {
 	m.search.SetSize(m.width, ch)
 	m.feed.SetSize(m.width, ch)
 	m.subs.SetSize(m.width, ch)
-	for i := range m.videoTabs {
-		m.videoTabs[i].detail.SetSize(m.width, ch)
+	for i := range m.videoTabs.All() {
+		m.videoTabs.At(i).detail.SetSize(m.width, ch)
 	}
 }
 
@@ -634,14 +604,14 @@ func (m *Model) renderTabs() string {
 	}
 
 	// Video tabs
-	for i, tab := range m.videoTabs {
+	for i, tab := range m.videoTabs.All() {
 		title := tab.title
 		if title == "" {
 			title = "..."
 		}
 		label := fmt.Sprintf("[%d] %s", i+4, shared.Truncate(title, 20))
 		style := tabStyle
-		if m.activeView == ViewVideoTab && m.activeTabIdx == i {
+		if m.activeView == ViewVideoTab && m.videoTabs.ActiveIdx() == i {
 			style = activeTabStyle
 		}
 		rendered = append(rendered, style.Render(label))
