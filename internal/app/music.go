@@ -17,6 +17,7 @@ import (
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/detail"
 	"github.com/deathmaz/ytui/internal/ui/search"
+	"github.com/deathmaz/ytui/internal/ui/urlinput"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -33,6 +34,7 @@ func (k musicKeyMap) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next section")),
 		key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "load all")),
 		key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "auth")),
+		key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "open URL")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	}
@@ -165,6 +167,7 @@ type MusicModel struct {
 	ytClient     youtube.Client
 	cfg          *config.Config
 	imgR         *ytimage.Renderer
+	urlInput     urlinput.Model
 
 	// Fixed views
 	activeFixed musicFixedView
@@ -214,6 +217,7 @@ func NewMusic(client *youtube.MusicClient, ytClient youtube.Client, cfg *config.
 		cfg:         cfg,
 		imgR:        imgR,
 		search:      s,
+		urlInput:    urlinput.New(),
 		spinner:     styles.NewSpinner(),
 		pendingOpen: opts.OpenURL,
 	}
@@ -241,6 +245,10 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = wsm.Height
 		m.help.Width = wsm.Width
 		m.resizeViews()
+	}
+
+	if cmd, handled := handleURLInput(msg, &m.urlInput); handled {
+		return m, cmd
 	}
 
 	if searchCmd, ok := handleSearchFocused(msg, &m.search, m.onFixedView && m.activeFixed == musicViewSearch, m.keys); ok {
@@ -303,6 +311,8 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.playAlbum()
 		case key.Matches(msg, m.keys.Auth):
 			return m, m.authenticate()
+		case key.Matches(msg, m.keys.OpenURL):
+			return m, m.urlInput.Show(m.width, m.height)
 		case key.Matches(msg, m.keys.Search), msg.String() == "/":
 			m.onFixedView = true
 			m.activeFixed = musicViewSearch
@@ -463,6 +473,11 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case musicItemSelectedMsg:
 		return m, m.openMusicItem(msg.item)
+
+	case urlinput.SubmitMsg:
+		return m, m.openParsedURL(&msg.Parsed)
+
+	case urlinput.CancelMsg:
 
 	case musicArtistLoadedMsg:
 		m.pageLoading = false
@@ -626,6 +641,10 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *MusicModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
+	}
+
+	if m.urlInput.IsActive() {
+		return m.urlInput.View()
 	}
 
 	var statusLine string

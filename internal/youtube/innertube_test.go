@@ -186,6 +186,9 @@ func TestParseYouTubeURL(t *testing.T) {
 		{"video with extra params", "https://www.youtube.com/watch?v=abc123&t=120", URLVideo, "abc123"},
 		{"empty", "", URLUnknown, ""},
 		{"garbage URL", "https://example.com/something", URLUnknown, ""},
+		{"invalid raw ID too long", "2434234234234", URLUnknown, ""},
+		{"invalid raw ID too short", "abc", URLUnknown, ""},
+		{"invalid raw ID special chars", "abc!@#$%^&*(", URLUnknown, ""},
 	}
 
 	for _, tt := range tests {

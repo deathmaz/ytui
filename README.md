@@ -80,6 +80,7 @@ ytui -music -open "https://youtube.com/playlist?list=PLxxx"  # open playlist in 
 | `L` | Load more (comments / search results) |
 | `a` | Authenticate (extract browser cookies) |
 | `o` | Open video in browser |
+| `O` | Open URL dialog (paste YouTube URL) |
 | `y` | Copy video URL to clipboard |
 | `r` | Refresh current view |
 | `?` | Toggle help |
@@ -101,6 +102,7 @@ ytui -music -open "https://youtube.com/playlist?list=PLxxx"  # open playlist in 
 | `P` | Play full album/playlist (in album tab) |
 | `L` | Load more (artist sections, library pagination) |
 | `a` | Authenticate (extract browser cookies) |
+| `O` | Open URL dialog (paste YouTube URL) |
 | `Esc` | Close current tab / blur input |
 | `q` | Quit |
 

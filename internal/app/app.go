@@ -22,6 +22,7 @@ import (
 	"github.com/deathmaz/ytui/internal/ui/feed"
 	"github.com/deathmaz/ytui/internal/ui/picker"
 	"github.com/deathmaz/ytui/internal/ui/search"
+	"github.com/deathmaz/ytui/internal/ui/urlinput"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/subs"
 	"github.com/deathmaz/ytui/internal/ui/styles"
@@ -70,6 +71,7 @@ type Model struct {
 	ytClient      youtube.Client
 	imgR          *ytimage.Renderer
 	picker        picker.Model
+	urlInput      urlinput.Model
 	cfg           *config.Config
 	videoTabs     []videoTab
 	activeTabIdx  int // index into videoTabs for current video tab
@@ -107,6 +109,7 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 		imgR:        imgR,
 		ytClient:    client,
 		picker:      picker.New(),
+		urlInput:    urlinput.New(),
 		cfg:         cfg,
 		pendingOpen: opts.OpenURL,
 	}
@@ -135,12 +138,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeViews()
 
 	case tea.KeyMsg:
-		// Quality picker takes priority when active
+		// Modal dialogs take priority
 		if m.picker.IsActive() {
 			var cmd tea.Cmd
 			m.picker, cmd = m.picker.Update(msg)
 			cmds = append(cmds, cmd)
 			return m, tea.Batch(cmds...)
+		}
+		if cmd, handled := handleURLInput(msg, &m.urlInput); handled {
+			return m, cmd
 		}
 
 		if key.Matches(msg, m.keys.ForceQuit) {
@@ -192,6 +198,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.authenticate()
 			case key.Matches(msg, m.keys.Open):
 				return m, m.openInBrowser()
+			case key.Matches(msg, m.keys.OpenURL):
+				return m, m.urlInput.Show(m.width, m.height)
 			case key.Matches(msg, m.keys.Yank):
 				return m, m.copyURL()
 			case key.Matches(msg, m.keys.Refresh):
@@ -210,6 +218,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shared.VideoSelectedMsg:
 		return m, m.openVideoTab(&msg.Video)
+
+	case urlinput.SubmitMsg:
+		return m, m.openParsedURL(&msg.Parsed)
+
+	case urlinput.CancelMsg:
 
 	case subs.ChannelSelectedMsg:
 		// TODO: show channel videos
@@ -316,6 +329,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) View() string {
 	if m.width == 0 {
 		return "Loading..."
+	}
+
+	if m.urlInput.IsActive() {
+		return m.urlInput.View()
 	}
 
 	if m.picker.IsActive() {

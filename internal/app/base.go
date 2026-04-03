@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/ui/search"
+	"github.com/deathmaz/ytui/internal/ui/urlinput"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
 
@@ -72,6 +73,17 @@ func handleSearchFocused(msg tea.Msg, s *search.Model, searchActive bool, keys K
 	}
 	updated, cmd := s.Update(msg)
 	*s = updated
+	return cmd, true
+}
+
+// handleURLInput delegates to the URL input dialog when active.
+// Returns (cmd, true) if handled, (nil, false) otherwise.
+func handleURLInput(msg tea.Msg, u *urlinput.Model) (tea.Cmd, bool) {
+	if !u.IsActive() {
+		return nil, false
+	}
+	updated, cmd := u.Update(msg)
+	*u = updated
 	return cmd, true
 }
 

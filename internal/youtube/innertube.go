@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -54,9 +55,12 @@ func ParseYouTubeURL(raw string) ParsedURL {
 		return ParsedURL{Kind: URLUnknown}
 	}
 
-	// No scheme or dots → raw video ID
+	// No scheme or dots → raw video ID (YouTube IDs are 11 chars, alphanumeric + -_)
 	if !strings.Contains(raw, ".") && !strings.Contains(raw, "/") {
-		return ParsedURL{Kind: URLVideo, ID: raw}
+		if isValidVideoID(raw) {
+			return ParsedURL{Kind: URLVideo, ID: raw}
+		}
+		return ParsedURL{Kind: URLUnknown}
 	}
 
 	// Ensure scheme for url.Parse
@@ -111,6 +115,12 @@ func ParseYouTubeURL(raw string) ParsedURL {
 	}
 
 	return ParsedURL{Kind: URLUnknown}
+}
+
+var videoIDRegex = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
+
+func isValidVideoID(s string) bool {
+	return videoIDRegex.MatchString(s)
 }
 
 // InnerTubeClient implements Client using YouTube's InnerTube API.

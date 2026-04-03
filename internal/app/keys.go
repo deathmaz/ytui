@@ -24,6 +24,7 @@ type KeyMap struct {
 	Top        key.Binding
 	Bottom     key.Binding
 	Open       key.Binding
+	OpenURL    key.Binding
 	Yank       key.Binding
 	Refresh    key.Binding
 	Auth       key.Binding
@@ -52,6 +53,7 @@ func DefaultKeyMap() KeyMap {
 		Top:        key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
 		Bottom:     key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
 		Open:       key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
+		OpenURL:    key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "open URL")),
 		Yank:       key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Refresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Auth:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "authenticate")),
