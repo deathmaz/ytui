@@ -107,9 +107,19 @@ func ParseYouTubeURL(raw string) ParsedURL {
 			}
 		}
 	case "youtu.be":
-		// youtu.be/ID
 		id := strings.TrimPrefix(path, "/")
-		if id != "" {
+		if isValidVideoID(id) {
+			return ParsedURL{Kind: URLVideo, ID: id}
+		}
+	default:
+		// Fallback for Invidious and other YouTube-compatible frontends (e.g. yewtu.be).
+		if path == "/watch" {
+			if v := u.Query().Get("v"); v != "" {
+				return ParsedURL{Kind: URLVideo, ID: v}
+			}
+		}
+		id := strings.TrimPrefix(path, "/")
+		if isValidVideoID(id) {
 			return ParsedURL{Kind: URLVideo, ID: id}
 		}
 	}
