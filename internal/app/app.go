@@ -60,7 +60,6 @@ type videoTab struct {
 // Model is the root Bubble Tea model.
 type Model struct {
 	activeView    View
-	prevView      View
 	width         int
 	height        int
 	keys          KeyMap
@@ -116,7 +115,7 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return initCmds(
+	cmd := initCmds(
 		m.cfg.Auth.AuthOnStartup,
 		&m.pendingOpen,
 		m.search.Init(),
@@ -125,6 +124,14 @@ func (m *Model) Init() tea.Cmd {
 		m.search.Query(),
 		m.search.Refresh,
 	)
+	// Auto-load the active view on startup
+	switch m.activeView {
+	case ViewFeed:
+		return tea.Batch(cmd, m.feed.Load(false))
+	case ViewSubs:
+		return tea.Batch(cmd, m.subs.Load(false))
+	}
+	return cmd
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -164,7 +171,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.videoTabs) > 0 {
 					m.activeTabIdx = len(m.videoTabs) - 1
 				} else {
-					m.activeView = m.prevView
+					m.activeView = ViewSearch
 				}
 				return m, nil
 			}
@@ -273,20 +280,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.feed = feed.New(msg.client)
 		m.subs = subs.New(msg.client)
 		m.resizeViews()
-		// Auto-reload the current view if it requires auth
-		var reloadCmd tea.Cmd
-		switch m.activeView {
-		case ViewFeed:
-			reloadCmd = m.feed.Load(true)
-		case ViewSubs:
-			reloadCmd = m.subs.Load(true)
-		}
+		feedCmd := m.feed.Load(true)
+		subsCmd := m.subs.Load(true)
 		var openCmd tea.Cmd
 		if m.pendingOpen != nil {
 			openCmd = m.openParsedURL(m.pendingOpen)
 			m.pendingOpen = nil
 		}
-		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), reloadCmd, openCmd)
+		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), feedCmd, subsCmd, openCmd)
 
 	case authResultMsg:
 		m.authenticating = false
@@ -414,7 +415,6 @@ func (m *Model) closeActiveVideoTab() {
 }
 
 func (m *Model) switchTo(v View) {
-	m.prevView = m.activeView
 	m.activeView = v
 }
 

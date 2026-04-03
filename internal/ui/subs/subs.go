@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -189,12 +188,11 @@ func (m Model) View() string {
 		return m.spinner.View() + " Loading subscriptions..."
 	}
 	if !m.loaded {
-		return lipgloss.NewStyle().
-			Foreground(styles.MidGray).
-			Render("Press 'a' to authenticate, then switch to Subs")
+		return styles.Dim.Render("Press 'a' to authenticate to view subscriptions")
 	}
 	if m.err != nil {
-		return styles.Accent.Render("Subscriptions error: " + m.err.Error())
+		return styles.Accent.Render("Subscriptions error: "+m.err.Error()) +
+			"\n\n" + styles.Dim.Render("Press 'a' to authenticate")
 	}
 	return m.list.View()
 }

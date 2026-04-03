@@ -226,7 +226,7 @@ func NewMusic(client *youtube.MusicClient, ytClient youtube.Client, cfg *config.
 }
 
 func (m *MusicModel) Init() tea.Cmd {
-	return initCmds(
+	cmd := initCmds(
 		m.cfg.Auth.AuthOnStartup,
 		&m.pendingOpen,
 		m.search.Init(),
@@ -235,6 +235,13 @@ func (m *MusicModel) Init() tea.Cmd {
 		m.search.Query(),
 		m.search.Refresh,
 	)
+	switch m.activeFixed {
+	case musicViewHome:
+		return tea.Batch(cmd, m.loadHome())
+	case musicViewLibrary:
+		return tea.Batch(cmd, m.loadLibrary())
+	}
+	return cmd
 }
 
 func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -575,19 +582,14 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.librarySubs = nil
 		m.librarySubIdx = 0
 		m.resizeViews()
-		var reloadCmd tea.Cmd
-		switch m.activeFixed {
-		case musicViewHome:
-			reloadCmd = m.loadHome()
-		case musicViewLibrary:
-			reloadCmd = m.loadLibrary()
-		}
+		homeCmd := m.loadHome()
+		libCmd := m.loadLibrary()
 		var openCmd tea.Cmd
 		if m.pendingOpen != nil {
 			openCmd = m.openParsedURL(m.pendingOpen)
 			m.pendingOpen = nil
 		}
-		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), reloadCmd, openCmd)
+		return m, tea.Batch(m.setStatus("Authenticated via "+m.cfg.Auth.Browser, 3*time.Second), homeCmd, libCmd, openCmd)
 
 	case musicAuthFailedMsg:
 		m.authenticating = false
@@ -992,7 +994,7 @@ func (m *MusicModel) renderHome() string {
 		return m.spinner.View() + " Loading home..."
 	}
 	if !m.homeLoaded || len(m.homeSubs) == 0 {
-		return styles.Dim.Render("Press 1 to load home feed")
+		return styles.Dim.Render("Home feed not loaded")
 	}
 
 	subBar := renderSubTabBar(m.homeSubs, m.homeSubIdx)
@@ -1016,7 +1018,7 @@ func (m *MusicModel) renderLibrary() string {
 		return m.spinner.View() + " Loading library..."
 	}
 	if !m.libraryLoaded || len(m.librarySubs) == 0 {
-		return styles.Dim.Render("Press 'a' to authenticate, then press 2 for Library")
+		return styles.Dim.Render("Press 'a' to authenticate to view library")
 	}
 
 	subBar := renderSubTabBar(m.librarySubs, m.librarySubIdx)
