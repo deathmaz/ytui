@@ -11,6 +11,28 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// WEB_REMIX client config — uses same bypass as WEB (see innertube.go).
+const (
+	musicClientName    = "WEB_REMIX"
+	musicClientVersion = "1.20260401.00.00"
+	musicClientID      = 67
+	musicAPIKey        = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
+	musicReferer       = "https://music.youtube.com/"
+)
+
+func newInnerTubeMusic(httpClient *http.Client) *innertubego.InnerTube {
+	return &innertubego.InnerTube{
+		Adaptor: innertubego.NewInnerTubeAdaptor(innertubego.ClientContext{
+			ClientName:    musicClientName,
+			ClientVersion: musicClientVersion,
+			ClientID:      musicClientID,
+			APIKey:        musicAPIKey,
+			UserAgent:     defaultUserAgent,
+			Referer:       musicReferer,
+		}, httpClient),
+	}
+}
+
 // MusicClient provides YouTube Music API access via InnerTube WEB_REMIX client.
 type MusicClient struct {
 	mu            sync.Mutex
@@ -21,10 +43,7 @@ type MusicClient struct {
 // NewMusicClient creates a new YouTube Music client.
 // Pass a custom httpClient with a cookie jar for authenticated requests.
 func NewMusicClient(httpClient *http.Client) (*MusicClient, error) {
-	it, err := innertubego.NewInnerTube(httpClient, "WEB_REMIX", "1.20230724.00.00", "", "", "", nil, true)
-	if err != nil {
-		return nil, fmt.Errorf("music innertube init: %w", err)
-	}
+	it := newInnerTubeMusic(httpClient)
 	return &MusicClient{it: it, authenticated: httpClient != nil && httpClient.Jar != nil}, nil
 }
 

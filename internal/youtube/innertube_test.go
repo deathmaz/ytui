@@ -157,6 +157,20 @@ func TestFormatSeconds(t *testing.T) {
 	}
 }
 
+func TestNewInnerTubeWEB(t *testing.T) {
+	it := newInnerTubeWEB(nil)
+	if it.Adaptor == nil {
+		t.Fatal("expected non-nil Adaptor")
+	}
+}
+
+func TestNewInnerTubeMusic(t *testing.T) {
+	it := newInnerTubeMusic(nil)
+	if it.Adaptor == nil {
+		t.Fatal("expected non-nil Adaptor")
+	}
+}
+
 func TestVideoURL(t *testing.T) {
 	got := VideoURL("abc123")
 	want := "https://www.youtube.com/watch?v=abc123"

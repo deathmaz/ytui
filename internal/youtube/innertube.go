@@ -16,6 +16,19 @@ import (
 
 const searchFilterVideosOnly = "EgIQAQ%3D%3D"
 
+// Shared user-agent for all InnerTube clients.
+const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+// WEB client config — bypasses innertube-go's stale hardcoded defaults
+// which YouTube now rejects with HTML responses.
+const (
+	webClientName    = "WEB"
+	webClientVersion = "2.20260401.00.00"
+	webClientID      = 1
+	webAPIKey        = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+	webReferer       = "https://www.youtube.com/"
+)
+
 // VideoURL returns the canonical watch URL for a video ID.
 func VideoURL(id string) string {
 	return "https://www.youtube.com/watch?v=" + id
@@ -139,13 +152,23 @@ type InnerTubeClient struct {
 	authenticated bool
 }
 
+func newInnerTubeWEB(httpClient *http.Client) *innertubego.InnerTube {
+	return &innertubego.InnerTube{
+		Adaptor: innertubego.NewInnerTubeAdaptor(innertubego.ClientContext{
+			ClientName:    webClientName,
+			ClientVersion: webClientVersion,
+			ClientID:      webClientID,
+			APIKey:        webAPIKey,
+			UserAgent:     defaultUserAgent,
+			Referer:       webReferer,
+		}, httpClient),
+	}
+}
+
 // NewInnerTubeClient creates a new InnerTube-backed client.
 // Pass a custom httpClient with a cookie jar for authenticated requests.
 func NewInnerTubeClient(httpClient *http.Client) (*InnerTubeClient, error) {
-	it, err := innertubego.NewInnerTube(httpClient, "WEB", "2.20240101.00.00", "", "", "", nil, true)
-	if err != nil {
-		return nil, fmt.Errorf("innertube init: %w", err)
-	}
+	it := newInnerTubeWEB(httpClient)
 	return &InnerTubeClient{it: it, authenticated: httpClient != nil && httpClient.Jar != nil}, nil
 }
 
