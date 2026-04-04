@@ -11,22 +11,20 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// WEB_REMIX client config — uses same bypass as WEB (see innertube.go).
+// WEB_REMIX client static config. Version and API key are scraped at startup.
 const (
-	musicClientName    = "WEB_REMIX"
-	musicClientVersion = "1.20260401.00.00"
-	musicClientID      = 67
-	musicAPIKey        = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
-	musicReferer       = "https://music.youtube.com/"
+	musicClientName = "WEB_REMIX"
+	musicClientID   = 67
+	musicReferer    = "https://music.youtube.com/"
 )
 
 func newInnerTubeMusic(httpClient *http.Client) *innertubego.InnerTube {
 	return &innertubego.InnerTube{
 		Adaptor: innertubego.NewInnerTubeAdaptor(innertubego.ClientContext{
 			ClientName:    musicClientName,
-			ClientVersion: musicClientVersion,
+			ClientVersion: clientParams.music.ClientVersion,
 			ClientID:      musicClientID,
-			APIKey:        musicAPIKey,
+			APIKey:        clientParams.music.APIKey,
 			UserAgent:     defaultUserAgent,
 			Referer:       musicReferer,
 		}, httpClient),

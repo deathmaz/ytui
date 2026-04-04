@@ -19,14 +19,12 @@ const searchFilterVideosOnly = "EgIQAQ%3D%3D"
 // Shared user-agent for all InnerTube clients.
 const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-// WEB client config — bypasses innertube-go's stale hardcoded defaults
-// which YouTube now rejects with HTML responses.
+// WEB client static config. Version and API key are scraped at startup
+// (see scrape.go) and read from clientParams.
 const (
-	webClientName    = "WEB"
-	webClientVersion = "2.20260401.00.00"
-	webClientID      = 1
-	webAPIKey        = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
-	webReferer       = "https://www.youtube.com/"
+	webClientName = "WEB"
+	webClientID   = 1
+	webReferer    = "https://www.youtube.com/"
 )
 
 // VideoURL returns the canonical watch URL for a video ID.
@@ -156,9 +154,9 @@ func newInnerTubeWEB(httpClient *http.Client) *innertubego.InnerTube {
 	return &innertubego.InnerTube{
 		Adaptor: innertubego.NewInnerTubeAdaptor(innertubego.ClientContext{
 			ClientName:    webClientName,
-			ClientVersion: webClientVersion,
+			ClientVersion: clientParams.web.ClientVersion,
 			ClientID:      webClientID,
-			APIKey:        webAPIKey,
+			APIKey:        clientParams.web.APIKey,
 			UserAgent:     defaultUserAgent,
 			Referer:       webReferer,
 		}, httpClient),

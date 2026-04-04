@@ -328,6 +328,13 @@ func TestGolden_Video_StatusMessage(t *testing.T) {
 	captureGolden(t, tm)
 }
 
+func TestGolden_Video_StartupWarning(t *testing.T) {
+	tm := newTestVideoProgramWithOpts(t, nil, Options{
+		Warning: "client params scrape failed: web: connection refused",
+	})
+	waitThenCapture(t, tm, "client params scrape failed")
+}
+
 func TestGolden_Music_Search_Empty(t *testing.T) {
 	tm := newTestMusicProgram(t, nil, nil)
 	time.Sleep(200 * time.Millisecond)
@@ -354,6 +361,13 @@ func TestGolden_Music_Search_WithResults(t *testing.T) {
 	}
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "music test"})
 	waitThenCapture(t, tm, "Top Hit Song")
+}
+
+func TestGolden_Music_StartupWarning(t *testing.T) {
+	tm := newTestMusicProgramWithOpts(t, nil, nil, nil, Options{
+		Warning: "client params scrape failed: music: connection refused",
+	})
+	waitThenCapture(t, tm, "client params scrape failed")
 }
 
 func TestGolden_Music_Home_NotLoaded(t *testing.T) {

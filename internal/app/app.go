@@ -74,6 +74,7 @@ type Model struct {
 
 	pendingVideoURL string
 	pendingOpen     *youtube.ParsedURL
+	startupWarning  string
 	status          StatusManager
 	downloading     bool
 	authenticating  bool
@@ -83,6 +84,7 @@ type Model struct {
 type Options struct {
 	SearchQuery string
 	OpenURL     *youtube.ParsedURL
+	Warning     string
 }
 
 // New creates a new root model with the given YouTube client, config, and options.
@@ -106,8 +108,9 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 		picker:      picker.New(),
 		urlInput:    urlinput.New(),
 		cfg:         cfg,
-		videoTabs:   NewTabSet[videoTab](maxVideoTabs, func(t *videoTab) string { return t.videoID }),
-		pendingOpen: opts.OpenURL,
+		videoTabs:      NewTabSet[videoTab](maxVideoTabs, func(t *videoTab) string { return t.videoID }),
+		pendingOpen:    opts.OpenURL,
+		startupWarning: opts.Warning,
 	}
 }
 
@@ -121,6 +124,10 @@ func (m *Model) Init() tea.Cmd {
 		m.search.Query(),
 		m.search.Refresh,
 	)
+	if m.startupWarning != "" {
+		cmd = tea.Batch(cmd, m.setStatus(m.startupWarning, 10*time.Second))
+		m.startupWarning = ""
+	}
 	// Auto-load the active view on startup
 	switch m.activeView {
 	case ViewFeed:

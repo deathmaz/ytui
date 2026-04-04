@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/deathmaz/ytui/internal/app"
@@ -37,6 +39,14 @@ func main() {
 		if parsed.Kind != youtube.URLUnknown {
 			opts.OpenURL = &parsed
 		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	scrapeErr := youtube.InitClientParams(ctx)
+	cancel()
+
+	if scrapeErr != nil {
+		opts.Warning = scrapeErr.Error()
 	}
 
 	var m tea.Model

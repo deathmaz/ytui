@@ -169,9 +169,10 @@ type MusicModel struct {
 	tabs        TabSet[musicTab]
 	pageLoading bool
 
-	authenticating bool
-	pendingOpen    *youtube.ParsedURL
-	status         StatusManager
+	authenticating  bool
+	pendingOpen     *youtube.ParsedURL
+	startupWarning  string
+	status          StatusManager
 }
 
 // NewMusic creates a new root model for music mode.
@@ -195,8 +196,9 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 		search:      s,
 		urlInput:    urlinput.New(),
 		spinner:     styles.NewSpinner(),
-		tabs:        NewTabSet[musicTab](maxMusicTabs, func(t *musicTab) string { return t.browseID }),
-		pendingOpen: opts.OpenURL,
+		tabs:           NewTabSet[musicTab](maxMusicTabs, func(t *musicTab) string { return t.browseID }),
+		pendingOpen:    opts.OpenURL,
+		startupWarning: opts.Warning,
 	}
 
 	return m
@@ -212,6 +214,10 @@ func (m *MusicModel) Init() tea.Cmd {
 		m.search.Query(),
 		m.search.Refresh,
 	)
+	if m.startupWarning != "" {
+		cmd = tea.Batch(cmd, m.setStatus(m.startupWarning, 10*time.Second))
+		m.startupWarning = ""
+	}
 	switch m.activeFixed {
 	case musicViewHome:
 		return tea.Batch(cmd, m.loadHome())
