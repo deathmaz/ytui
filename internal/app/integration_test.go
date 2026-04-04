@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -267,5 +270,598 @@ func TestBothModes_InitialViewIsSearch(t *testing.T) {
 	mm := quitAndGetMusicModel(t, mtm)
 	if !mm.onFixedView || mm.activeFixed != musicViewSearch {
 		t.Errorf("music mode: expected search view, got onFixed=%v activeFixed=%d", mm.onFixedView, mm.activeFixed)
+	}
+}
+
+// === Priority 1: Error Handling ===
+
+func TestVideoMode_FeedLoadError(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getFeedFn: func(_ context.Context, token string) (*youtube.Page[youtube.Video], error) {
+			return nil, fmt.Errorf("network timeout")
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "1")
+	waitForContent(t, tm, "Feed error")
+	quitAndGetVideoModel(t, tm)
+}
+
+func TestVideoMode_SubsLoadError(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return nil, fmt.Errorf("network timeout")
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Subscriptions error")
+	quitAndGetVideoModel(t, tm)
+}
+
+func TestVideoMode_SearchError(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return nil, fmt.Errorf("search failed")
+		},
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	time.Sleep(500 * time.Millisecond)
+	// Should not crash — can type a new query
+	m := quitAndGetVideoModel(t, tm)
+	if m.activeView != ViewSearch {
+		t.Errorf("expected search view after error, got %d", m.activeView)
+	}
+}
+
+func TestVideoMode_DetailLoadError(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "err1", Title: "Error Video", URL: "https://youtube.com/watch?v=err1"}},
+			}, nil
+		},
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return nil, fmt.Errorf("video not found")
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	waitForContent(t, tm, "Error Video")
+	sendKey(tm, "i")
+	time.Sleep(500 * time.Millisecond)
+	// Should not crash
+	quitAndGetVideoModel(t, tm)
+}
+
+func TestMusicMode_HomeLoadError(t *testing.T) {
+	mc := &mockMusicClient{
+		authenticated: true,
+		getHomeFn: func(_ context.Context) ([]youtube.MusicShelf, error) {
+			return nil, fmt.Errorf("home unavailable")
+		},
+	}
+	tm := newTestMusicProgram(t, nil, mc)
+	sendKey(tm, "1")
+	waitForContent(t, tm, "Home error")
+	quitAndGetMusicModel(t, tm)
+}
+
+func TestMusicMode_ArtistLoadError(t *testing.T) {
+	mc := &mockMusicClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, cont string) (*youtube.MusicSearchResult, error) {
+			return &youtube.MusicSearchResult{
+				Shelves: []youtube.MusicShelf{
+					{Title: "Artists", Items: []youtube.MusicItem{
+						{Title: "Bad Artist", Type: youtube.MusicArtist, BrowseID: "bad1"},
+					}},
+				},
+			}, nil
+		},
+		getArtistFn: func(_ context.Context, browseID string) (*youtube.MusicArtistPage, error) {
+			return nil, fmt.Errorf("artist not found")
+		},
+	}
+	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "bad"})
+	waitForContent(t, tm, "Bad Artist")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Error")
+	quitAndGetMusicModel(t, tm)
+}
+
+func TestMusicMode_AlbumLoadError(t *testing.T) {
+	mc := &mockMusicClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, cont string) (*youtube.MusicSearchResult, error) {
+			return &youtube.MusicSearchResult{
+				Shelves: []youtube.MusicShelf{
+					{Title: "Albums", Items: []youtube.MusicItem{
+						{Title: "Bad Album", Type: youtube.MusicAlbum, BrowseID: "bad_alb"},
+					}},
+				},
+			}, nil
+		},
+		getAlbumFn: func(_ context.Context, browseID string) (*youtube.MusicAlbumPage, error) {
+			return nil, fmt.Errorf("album not found")
+		},
+	}
+	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "bad"})
+	waitForContent(t, tm, "Bad Album")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Error")
+	quitAndGetMusicModel(t, tm)
+}
+
+// === Priority 2: Double-Press Guards ===
+
+func TestVideoMode_DoubleAuthGuard(t *testing.T) {
+	client := &mockYTClient{authenticated: true}
+	tm := newTestVideoProgram(t, client)
+	// Already authenticated — pressing a should show "Already authenticated"
+	sendKey(tm, "a")
+	waitForContent(t, tm, "Already authenticated")
+	// Second press should also just show the same message, not crash
+	sendKey(tm, "a")
+	time.Sleep(200 * time.Millisecond)
+	quitAndGetVideoModel(t, tm)
+}
+
+func TestVideoMode_DoubleFeedLoadGuard(t *testing.T) {
+	var callCount atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getFeedFn: func(ctx context.Context, token string) (*youtube.Page[youtube.Video], error) {
+			callCount.Add(1)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(2 * time.Second):
+				return &youtube.Page[youtube.Video]{}, nil
+			}
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "1")
+	time.Sleep(50 * time.Millisecond)
+	sendKey(tm, "3") // switch away
+	time.Sleep(50 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEscape)
+	time.Sleep(50 * time.Millisecond)
+	sendKey(tm, "1") // switch back — should not re-trigger load (still loading)
+	time.Sleep(200 * time.Millisecond)
+	quitAndGetVideoModel(t, tm)
+	if c := callCount.Load(); c > 1 {
+		t.Errorf("expected 1 feed load call, got %d", c)
+	}
+}
+
+func TestMusicMode_DoubleHomeLoadGuard(t *testing.T) {
+	mc := &mockMusicClient{
+		authenticated: true,
+		getHomeFn: func(ctx context.Context) ([]youtube.MusicShelf, error) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(2 * time.Second):
+				return []youtube.MusicShelf{}, nil
+			}
+		},
+	}
+	tm := newTestMusicProgram(t, nil, mc)
+	sendKey(tm, "1")
+	time.Sleep(50 * time.Millisecond)
+	sendKey(tm, "3")
+	time.Sleep(50 * time.Millisecond)
+	sendKey(tm, "1") // should not re-trigger (still loading)
+	time.Sleep(200 * time.Millisecond)
+	quitAndGetMusicModel(t, tm)
+	mc.mu.Lock()
+	calls := mc.homeCalls
+	mc.mu.Unlock()
+	if calls > 1 {
+		t.Errorf("expected 1 home load call, got %d", calls)
+	}
+}
+
+// === Priority 3: Pagination ===
+
+func TestVideoMode_FeedPagination(t *testing.T) {
+	var page atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getFeedFn: func(_ context.Context, token string) (*youtube.Page[youtube.Video], error) {
+			page.Add(1)
+			if token == "" {
+				return &youtube.Page[youtube.Video]{
+					Items:     []youtube.Video{{ID: "p1v1", Title: "Page1 Video"}},
+					NextToken: "page2token",
+				}, nil
+			}
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "p2v1", Title: "Page2 Video"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "1")
+	waitForContent(t, tm, "Page1 Video")
+	sendKey(tm, "G")
+	time.Sleep(500 * time.Millisecond)
+	quitAndGetVideoModel(t, tm)
+	if p := page.Load(); p < 2 {
+		t.Errorf("expected at least 2 feed page loads, got %d", p)
+	}
+}
+
+func TestVideoMode_SearchPagination(t *testing.T) {
+	var page atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			page.Add(1)
+			if token == "" {
+				return &youtube.Page[youtube.Video]{
+					Items:     []youtube.Video{{ID: "s1", Title: "Search Result 1"}},
+					NextToken: "searchpage2",
+				}, nil
+			}
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "s2", Title: "Search Result Page2"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	waitForContent(t, tm, "Search Result 1")
+	sendKey(tm, "G")
+	time.Sleep(500 * time.Millisecond)
+	quitAndGetVideoModel(t, tm)
+	if p := page.Load(); p < 2 {
+		t.Errorf("expected at least 2 search page loads, got %d", p)
+	}
+}
+
+// === Priority 4: Key Actions ===
+
+func TestVideoMode_PlayKey(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "play1", Title: "Play Test", URL: "https://youtube.com/watch?v=play1"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "play"})
+	waitForContent(t, tm, "Play Test")
+	// p key triggers play — it calls an external command which will fail in test,
+	// but it should not crash the app
+	sendKey(tm, "p")
+	time.Sleep(200 * time.Millisecond)
+	quitAndGetVideoModel(t, tm) // verify no crash
+}
+
+func TestVideoMode_DownloadKey(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "dl1", Title: "Download Test", URL: "https://youtube.com/watch?v=dl1"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "download"})
+	waitForContent(t, tm, "Download Test")
+	sendKey(tm, "d")
+	// Download starts (may complete quickly with mock "echo" command)
+	// Check that either downloading state or result status appears
+	waitForContent(t, tm, "Download")
+	quitAndGetVideoModel(t, tm)
+}
+
+func TestVideoMode_RefreshKey(t *testing.T) {
+	var callCount atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getFeedFn: func(_ context.Context, token string) (*youtube.Page[youtube.Video], error) {
+			callCount.Add(1)
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "r1", Title: "Refreshable"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "1")
+	waitForContent(t, tm, "Refreshable")
+	initial := callCount.Load()
+	sendKey(tm, "r") // refresh
+	time.Sleep(300 * time.Millisecond)
+	quitAndGetVideoModel(t, tm)
+	if c := callCount.Load(); c <= initial {
+		t.Errorf("expected refresh to trigger another feed load; before=%d after=%d", initial, c)
+	}
+}
+
+func TestVideoMode_CopyURLKey(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cp1", Title: "Copy Test", URL: "https://youtube.com/watch?v=cp1"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "copy"})
+	waitForContent(t, tm, "Copy Test")
+	sendKey(tm, "y")
+	waitForContent(t, tm, "URL copied")
+	quitAndGetVideoModel(t, tm)
+}
+
+func TestVideoMode_OpenBrowserKey(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "ob1", Title: "Browser Test", URL: "https://youtube.com/watch?v=ob1"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "browser"})
+	waitForContent(t, tm, "Browser Test")
+	sendKey(tm, "o")
+	waitForContent(t, tm, "Opening in browser")
+	quitAndGetVideoModel(t, tm)
+}
+
+// === Priority 5: Tab Management Edge Cases ===
+
+func TestVideoMode_MaxTabsReached(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Video " + id, URL: "https://youtube.com/watch?v=" + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	for i := 0; i < maxVideoTabs; i++ {
+		tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: fmt.Sprintf("v%d", i), Title: fmt.Sprintf("Tab %d", i)}})
+		time.Sleep(100 * time.Millisecond)
+	}
+	// Try 7th
+	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "v6", Title: "Tab 6"}})
+	waitForContent(t, tm, "Max video tabs")
+	quitAndGetVideoModel(t, tm)
+}
+
+func TestVideoMode_CloseLastTabFallback(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Only Tab", URL: "https://youtube.com/watch?v=" + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "only", Title: "Only Tab"}})
+	waitForContent(t, tm, "Only Tab")
+	sendSpecialKey(tm, tea.KeyEscape)
+	time.Sleep(200 * time.Millisecond)
+	m := quitAndGetVideoModel(t, tm)
+	if m.activeView != ViewSearch {
+		t.Errorf("expected fallback to search after closing last tab, got %d", m.activeView)
+	}
+	if m.videoTabs.Len() != 0 {
+		t.Errorf("expected 0 tabs, got %d", m.videoTabs.Len())
+	}
+}
+
+func TestVideoMode_TabNumberKeys(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Video " + id, URL: "https://youtube.com/watch?v=" + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	// Open 3 tabs
+	for i := 1; i <= 3; i++ {
+		tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: fmt.Sprintf("t%d", i), Title: fmt.Sprintf("Tab%d", i)}})
+		time.Sleep(150 * time.Millisecond)
+	}
+	// Press 4 to switch to first video tab
+	sendKey(tm, "4")
+	time.Sleep(200 * time.Millisecond)
+	m := quitAndGetVideoModel(t, tm)
+	if m.videoTabs.ActiveIdx() != 0 {
+		t.Errorf("expected tab index 0 after pressing 4, got %d", m.videoTabs.ActiveIdx())
+	}
+}
+
+func TestMusicMode_CloseLastTabFallback(t *testing.T) {
+	mc := &mockMusicClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, cont string) (*youtube.MusicSearchResult, error) {
+			return &youtube.MusicSearchResult{
+				Shelves: []youtube.MusicShelf{
+					{Title: "Artists", Items: []youtube.MusicItem{
+						{Title: "Close Test Artist", Type: youtube.MusicArtist, BrowseID: "close1"},
+					}},
+				},
+			}, nil
+		},
+		getArtistFn: func(_ context.Context, browseID string) (*youtube.MusicArtistPage, error) {
+			return &youtube.MusicArtistPage{
+				Name:    "Close Test Artist",
+				Shelves: []youtube.MusicShelf{{Title: "Songs", Items: []youtube.MusicItem{{Title: "Song", Type: youtube.MusicSong}}}},
+			}, nil
+		},
+	}
+	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "close"})
+	waitForContent(t, tm, "Close Test Artist")
+	sendSpecialKey(tm, tea.KeyEnter)
+	time.Sleep(300 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEscape)
+	time.Sleep(200 * time.Millisecond)
+	m := quitAndGetMusicModel(t, tm)
+	if !m.onFixedView {
+		t.Error("expected fallback to fixed view after closing last music tab")
+	}
+}
+
+// === Priority 6: Modal Interactions ===
+
+func TestVideoMode_URLInput_Cancel(t *testing.T) {
+	tm := newTestVideoProgram(t, nil)
+	sendKey(tm, "O")
+	waitForContent(t, tm, "Open URL")
+	sendSpecialKey(tm, tea.KeyEscape)
+	time.Sleep(200 * time.Millisecond)
+	m := quitAndGetVideoModel(t, tm)
+	if m.urlInput.IsActive() {
+		t.Error("URL input should be closed after Esc")
+	}
+	if m.videoTabs.Len() != 0 {
+		t.Error("no tab should be opened after cancelling URL input")
+	}
+}
+
+func TestVideoMode_QualityPicker_Cancel(t *testing.T) {
+	tm := newTestVideoProgram(t, nil)
+	tm.Send(formatsLoadedMsg{
+		url: "https://youtube.com/watch?v=test",
+		formats: []player.Format{
+			{ID: "best", Display: "Best"},
+			{ID: "720", Display: "720p"},
+		},
+	})
+	waitForContent(t, tm, "Best")
+	sendSpecialKey(tm, tea.KeyEscape)
+	time.Sleep(200 * time.Millisecond)
+	m := quitAndGetVideoModel(t, tm)
+	if m.picker.IsActive() {
+		t.Error("picker should be closed after Esc")
+	}
+	if m.pendingVideoURL != "" {
+		t.Error("pending URL should be cleared after cancel")
+	}
+}
+
+// === Priority 7: Search Focus Management ===
+
+func TestVideoMode_SearchFocusBlocksGlobalKeys(t *testing.T) {
+	tm := newTestVideoProgram(t, nil)
+	// Focus search input
+	sendKey(tm, "/")
+	time.Sleep(100 * time.Millisecond)
+	// Type 'q' — should go into search input, NOT quit the app
+	sendKey(tm, "q")
+	time.Sleep(100 * time.Millisecond)
+	// App should still be running, not quit
+	sendSpecialKey(tm, tea.KeyEscape) // blur
+	time.Sleep(100 * time.Millisecond)
+	m := quitAndGetVideoModel(t, tm)
+	if m.activeView != ViewSearch {
+		t.Errorf("expected search view, got %d", m.activeView)
+	}
+}
+
+func TestVideoMode_SearchSubmitBlurs(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "sr1", Title: "Submit Result"}},
+			}, nil
+		},
+	}
+	// Use SearchQuery to auto-submit — after results load, input is blurred to list
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	waitForContent(t, tm, "Submit Result")
+	// Global keys should work now (input blurred after search submit)
+	sendKey(tm, "?")
+	time.Sleep(100 * time.Millisecond)
+	m := quitAndGetVideoModel(t, tm)
+	if !m.help.ShowAll {
+		t.Error("expected ? to toggle help after search submit (input should be blurred)")
+	}
+}
+
+// === Priority 8: Cross-Mode Parity ===
+
+func TestBothModes_EscClosesTab(t *testing.T) {
+	// Video: open tab, esc closes it
+	vc := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "V " + id, URL: "https://youtube.com/watch?v=" + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+	vtm := newTestVideoProgram(t, vc)
+	vtm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "esc1", Title: "Esc Test"}})
+	waitForContent(t, vtm, "Esc Test")
+	sendSpecialKey(vtm, tea.KeyEscape)
+	time.Sleep(200 * time.Millisecond)
+	vm := quitAndGetVideoModel(t, vtm)
+
+	// Music: open tab, esc closes it
+	mc := &mockMusicClient{
+		authenticated: true,
+		getArtistFn: func(_ context.Context, browseID string) (*youtube.MusicArtistPage, error) {
+			return &youtube.MusicArtistPage{
+				Name:    "Esc Artist",
+				Shelves: []youtube.MusicShelf{{Title: "Songs", Items: []youtube.MusicItem{{Title: "Song", Type: youtube.MusicSong}}}},
+			}, nil
+		},
+	}
+	mtm := newTestMusicProgram(t, nil, mc)
+	mtm.Send(musicItemSelectedMsg{item: youtube.MusicItem{Title: "Esc Artist", Type: youtube.MusicArtist, BrowseID: "esc1"}})
+	time.Sleep(300 * time.Millisecond)
+	sendSpecialKey(mtm, tea.KeyEscape)
+	time.Sleep(200 * time.Millisecond)
+	mm := quitAndGetMusicModel(t, mtm)
+
+	// Both should have no dynamic tabs
+	if vm.videoTabs.Len() != 0 {
+		t.Errorf("video: expected 0 tabs after esc, got %d", vm.videoTabs.Len())
+	}
+	if mm.tabs.Len() != 0 {
+		t.Errorf("music: expected 0 tabs after esc, got %d", mm.tabs.Len())
+	}
+}
+
+func TestBothModes_SearchFocusParity(t *testing.T) {
+	vtm := newTestVideoProgram(t, nil)
+	sendKey(vtm, "/")
+	time.Sleep(100 * time.Millisecond)
+	vm := quitAndGetVideoModel(t, vtm)
+
+	mtm := newTestMusicProgram(t, nil, nil)
+	sendKey(mtm, "/")
+	time.Sleep(100 * time.Millisecond)
+	mm := quitAndGetMusicModel(t, mtm)
+
+	if vm.activeView != ViewSearch {
+		t.Errorf("video: expected search view after /, got %d", vm.activeView)
+	}
+	if !mm.onFixedView || mm.activeFixed != musicViewSearch {
+		t.Errorf("music: expected search view after /, got onFixed=%v activeFixed=%d", mm.onFixedView, mm.activeFixed)
 	}
 }

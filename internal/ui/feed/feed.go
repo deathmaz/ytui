@@ -119,12 +119,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case FeedLoadedMsg:
 		m.loading = false
 		m.loadingMore = false
+		m.loaded = true
 		if msg.Err != nil {
 			m.err = msg.Err
 			return m, nil
 		}
 		m.err = nil
-		m.loaded = true
 		m.nextToken = msg.NextToken
 
 		var newItems []list.Item
