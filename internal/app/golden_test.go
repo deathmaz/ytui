@@ -82,6 +82,26 @@ func TestGolden_Video_Search_WithResults(t *testing.T) {
 	waitThenCapture(t, tm, "Learn Go Programming")
 }
 
+func TestGolden_Video_Search_WithThumbnails(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "v1", Title: "Learn Go Programming", ChannelName: "Go Tutorials", ViewCount: "1.2M views", PublishedAt: "2 days ago", DurationStr: "12:34"},
+					{ID: "v2", Title: "Advanced Go Patterns", ChannelName: "Code Academy", ViewCount: "500K views", PublishedAt: "1 week ago", DurationStr: "45:00"},
+					{ID: "v3", Title: "Go Concurrency Deep Dive", ChannelName: "Tech Talk", ViewCount: "300K views", PublishedAt: "3 days ago", DurationStr: "28:15"},
+				},
+			}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Search.Thumbnails = true
+	cfg.Search.ThumbnailHeight = 5
+	tm := newTestVideoProgramFull(t, client, cfg, Options{SearchQuery: "golang"})
+	waitThenCapture(t, tm, "Learn Go Programming")
+}
+
 func TestGolden_Video_Feed_Unauthenticated(t *testing.T) {
 	tm := newTestVideoProgram(t, &mockYTClient{authenticated: false})
 	sendKey(tm, "1")
@@ -179,7 +199,7 @@ func TestGolden_Video_Detail_Info(t *testing.T) {
 		},
 	}
 	// Search → results appear → press i to open detail
-	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	tm := newTestVideoProgramFull(t, client, nil, Options{SearchQuery: "test"}, "d1")
 	waitForContent(t, tm, "Test Video for Detail")
 	sendKey(tm, "i")
 	waitThenCapture(t, tm, "1.5M views")
@@ -214,7 +234,7 @@ func TestGolden_Video_Detail_Comments(t *testing.T) {
 		},
 	}
 	// Search → results → i to open detail → tab to switch to comments
-	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	tm := newTestVideoProgramFull(t, client, nil, Options{SearchQuery: "test"}, "c1")
 	waitForContent(t, tm, "Comments Test Video")
 	sendKey(tm, "i")
 	time.Sleep(500 * time.Millisecond)
@@ -287,7 +307,7 @@ func TestGolden_Video_MultipleTabs(t *testing.T) {
 		},
 	}
 	// Search → results → open 3 tabs via i → back → j → i
-	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "tabs"})
+	tm := newTestVideoProgramFull(t, client, nil, Options{SearchQuery: "tabs"}, "tab1", "tab2", "tab3")
 	waitForContent(t, tm, "First Video Tab")
 	sendKey(tm, "i")
 	time.Sleep(200 * time.Millisecond)

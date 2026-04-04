@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	ytimage "github.com/deathmaz/ytui/internal/image"
+	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -180,7 +181,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		// Start thumbnail fetch
 		if m.imgR != nil {
-			thumbURL := bestThumbnail(m.video)
+			thumbURL := shared.BestThumbnail(*m.video)
 			if thumbURL != "" {
 				tx, pl := m.imgR.Get(thumbURL)
 				if pl != "" {
@@ -719,21 +720,6 @@ func (m *Model) renderCommentStr(c youtube.Comment, isReply bool, selected bool)
 	return b.String()
 }
 
-func bestThumbnail(v *youtube.Video) string {
-	if len(v.Thumbnails) > 0 {
-		best := v.Thumbnails[0]
-		for _, t := range v.Thumbnails[1:] {
-			if t.Width > best.Width {
-				best = t
-			}
-		}
-		return best.URL
-	}
-	if v.ID != "" {
-		return "https://i.ytimg.com/vi/" + v.ID + "/hqdefault.jpg"
-	}
-	return ""
-}
 
 func viewportKeyMap() viewport.KeyMap {
 	return viewport.KeyMap{

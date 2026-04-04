@@ -14,6 +14,7 @@ type Config struct {
 	Player   PlayerConfig   `toml:"player"`
 	Download DownloadConfig `toml:"download"`
 	Auth     AuthConfig     `toml:"auth"`
+	Search   SearchConfig   `toml:"search"`
 }
 
 // GeneralConfig holds general settings.
@@ -69,6 +70,12 @@ type AuthConfig struct {
 	AuthOnStartup bool   `toml:"auth_on_startup"`
 }
 
+// SearchConfig configures search result display.
+type SearchConfig struct {
+	Thumbnails      bool `toml:"thumbnails"`        // show thumbnails in search results (requires Kitty terminal)
+	ThumbnailHeight int  `toml:"thumbnail_height"`  // thumbnail height in terminal rows (default: 5)
+}
+
 // Default returns the default configuration.
 func Default() *Config {
 	return &Config{
@@ -88,6 +95,9 @@ func Default() *Config {
 		Auth: AuthConfig{
 			Browser:       "brave",
 			AuthOnStartup: false,
+		},
+		Search: SearchConfig{
+			ThumbnailHeight: 5,
 		},
 	}
 }

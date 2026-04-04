@@ -72,6 +72,12 @@ func TestDefault(t *testing.T) {
 	if cfg.Auth.AuthOnStartup {
 		t.Error("Auth.AuthOnStartup should default to false")
 	}
+	if cfg.Search.Thumbnails {
+		t.Error("Search.Thumbnails should default to false")
+	}
+	if cfg.Search.ThumbnailHeight != 5 {
+		t.Errorf("Search.ThumbnailHeight = %d, want 5", cfg.Search.ThumbnailHeight)
+	}
 }
 
 func TestLoad_NoFile(t *testing.T) {
@@ -194,6 +200,37 @@ func TestEffective_FallbackToVideo(t *testing.T) {
 	}
 	if cfg.Player.EffectiveCommand(true) != "mpv" {
 		t.Errorf("EffectiveCommand(true) = %q, want %q", cfg.Player.EffectiveCommand(true), "mpv")
+	}
+}
+
+func TestLoad_SearchThumbnails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfgDir := filepath.Join(dir, "ytui")
+	os.MkdirAll(cfgDir, 0755)
+
+	content := `
+[search]
+thumbnails = true
+thumbnail_height = 7
+`
+	os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0644)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !cfg.Search.Thumbnails {
+		t.Error("Search.Thumbnails should be true")
+	}
+	if cfg.Search.ThumbnailHeight != 7 {
+		t.Errorf("Search.ThumbnailHeight = %d, want 7", cfg.Search.ThumbnailHeight)
+	}
+	// Other defaults should be preserved
+	if cfg.Player.Video.Command != "mpv" {
+		t.Errorf("Player.Video.Command = %q, want default %q", cfg.Player.Video.Command, "mpv")
 	}
 }
 

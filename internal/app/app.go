@@ -92,7 +92,8 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 	h := help.New()
 	h.ShortSeparator = "  "
 	imgR := ytimage.NewRenderer()
-	s := search.New(newVideoSearchConfig(client))
+	searchImgR := newSearchImgR(cfg)
+	s := search.New(newVideoSearchConfig(client, searchImgR, cfg))
 	if opts.SearchQuery != "" {
 		s.SetQuery(opts.SearchQuery)
 	}
@@ -112,6 +113,13 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 		pendingOpen:    opts.OpenURL,
 		startupWarning: opts.Warning,
 	}
+}
+
+func newSearchImgR(cfg *config.Config) *ytimage.Renderer {
+	if cfg.Search.Thumbnails {
+		return ytimage.NewRenderer()
+	}
+	return nil
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -285,7 +293,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return err
 				}
 				m.ytClient = newClient
-				m.search = search.New(newVideoSearchConfig(newClient))
+				m.search = search.New(newVideoSearchConfig(newClient, newSearchImgR(m.cfg), m.cfg))
 				m.feed = feed.New(newClient)
 				m.subs = subs.New(newClient)
 				return nil
@@ -645,10 +653,21 @@ func (m *Model) renderContent() string {
 	return ""
 }
 
-func newVideoSearchConfig(client youtube.Client) search.Config {
+func newVideoSearchConfig(client youtube.Client, imgR *ytimage.Renderer, cfg *config.Config) search.Config {
+	var delegate list.ItemDelegate
+	if cfg.Search.Thumbnails && imgR != nil {
+		thumbH := cfg.Search.ThumbnailHeight
+		if thumbH <= 0 {
+			thumbH = 5
+		}
+		delegate = shared.NewVideoDelegate(imgR, thumbH)
+	} else {
+		delegate = shared.VideoDelegate{}
+	}
 	return search.Config{
 		Placeholder: "Search YouTube...",
-		Delegate:    shared.VideoDelegate{},
+		Delegate:    delegate,
+		ImgR:        imgR,
 		SearchFn: func(ctx context.Context, query, pageToken string) search.SearchResult {
 			page, err := client.Search(ctx, query, pageToken)
 			if err != nil {

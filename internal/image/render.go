@@ -16,8 +16,10 @@ type ThumbnailLoadedMsg struct {
 
 // Renderer manages thumbnail fetching, encoding, and caching.
 type Renderer struct {
-	mu    sync.RWMutex
-	cache map[string]cachedThumb
+	mu      sync.RWMutex
+	cache   map[string]cachedThumb
+	inflight map[string]bool // URLs currently being fetched
+	sem     chan struct{}     // concurrency limiter
 }
 
 type cachedThumb struct {
@@ -28,7 +30,9 @@ type cachedThumb struct {
 // NewRenderer creates a new thumbnail renderer.
 func NewRenderer() *Renderer {
 	return &Renderer{
-		cache: make(map[string]cachedThumb),
+		cache:    make(map[string]cachedThumb),
+		inflight: make(map[string]bool),
+		sem:      make(chan struct{}, 3), // max 3 concurrent fetches
 	}
 }
 
@@ -45,6 +49,15 @@ func (r *Renderer) Store(url, transmitStr, placeholder string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cache[url] = cachedThumb{transmitStr: transmitStr, placeholder: placeholder}
+	delete(r.inflight, url)
+}
+
+// ClearInflight removes a URL from the in-flight set without caching,
+// allowing it to be retried.
+func (r *Renderer) ClearInflight(url string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.inflight, url)
 }
 
 // FetchCmd returns a tea.Cmd that fetches and encodes a thumbnail.
@@ -53,14 +66,21 @@ func (r *Renderer) FetchCmd(url string, cols, rows int) tea.Cmd {
 		return nil
 	}
 
-	r.mu.RLock()
-	_, ok := r.cache[url]
-	r.mu.RUnlock()
-	if ok {
+	r.mu.Lock()
+	_, cached := r.cache[url]
+	_, fetching := r.inflight[url]
+	if cached || fetching {
+		r.mu.Unlock()
 		return nil
 	}
+	r.inflight[url] = true
+	r.mu.Unlock()
 
 	return func() tea.Msg {
+		// Acquire semaphore slot to limit concurrency
+		r.sem <- struct{}{}
+		defer func() { <-r.sem }()
+
 		img, err := FetchImage(url)
 		if err != nil {
 			return ThumbnailLoadedMsg{URL: url, Err: err}

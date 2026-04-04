@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 )
@@ -52,6 +54,7 @@ type Config struct {
 	Delegate    list.ItemDelegate
 	SearchFn    SearchFunc
 	SelectFn    SelectFunc
+	ImgR        *ytimage.Renderer // optional: enables thumbnail caching for search results
 }
 
 // Model is a reusable search view with input, spinner, and results list.
@@ -69,6 +72,8 @@ type Model struct {
 	height      int
 	searchFn    SearchFunc
 	selectFn    SelectFunc
+	imgR        *ytimage.Renderer
+	transmitted map[string]bool // tracks which images have been transmitted to Kitty
 }
 
 // New creates a new search model with the given configuration.
@@ -84,14 +89,21 @@ func New(cfg Config) Model {
 
 	l := shared.NewList(cfg.Delegate)
 
+	var transmitted map[string]bool
+	if cfg.ImgR != nil {
+		transmitted = make(map[string]bool)
+	}
+
 	return Model{
-		input:    ti,
-		results:  l,
-		spinner:  styles.NewSpinner(),
-		keys:     defaultKeyMap(),
-		focused:  focusInput,
-		searchFn: cfg.SearchFn,
-		selectFn: cfg.SelectFn,
+		input:       ti,
+		results:     l,
+		spinner:     styles.NewSpinner(),
+		keys:        defaultKeyMap(),
+		focused:     focusInput,
+		searchFn:    cfg.SearchFn,
+		selectFn:    cfg.SelectFn,
+		imgR:        cfg.ImgR,
+		transmitted: transmitted,
 	}
 }
 
@@ -203,6 +215,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, m.loadMore()
 		}
 
+	case ytimage.ThumbnailLoadedMsg:
+		if m.imgR != nil {
+			if msg.Err == nil && msg.Placeholder != "" {
+				m.imgR.Store(msg.URL, msg.TransmitStr, msg.Placeholder)
+			} else {
+				// Clear in-flight flag so the fetch can be retried.
+				m.imgR.ClearInflight(msg.URL)
+			}
+		}
+		return m, nil
+
 	case resultMsg:
 		m.searching = false
 		m.loadingMore = false
@@ -222,7 +245,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			cmd := m.results.SetItems(msg.result.Items)
 			cmds = append(cmds, cmd)
 		}
-		return m, tea.Batch(cmds...)
+		// Fall through to delegate section so the delegate's Update()
+		// can trigger initial thumbnail fetches for the new items.
 
 	case spinner.TickMsg:
 		if m.searching || m.loadingMore {
@@ -261,10 +285,38 @@ func (m Model) View() string {
 		)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	view := lipgloss.JoinVertical(lipgloss.Left,
 		inputView,
 		m.results.View(),
 	)
+
+	// Prepend Kitty transmit sequences for cached images that haven't
+	// been transmitted yet. This keeps APC escapes out of the list's
+	// delegate output (which would break layout measurement) and
+	// matches the detail view's pattern.
+	if m.transmitted != nil {
+		var tx strings.Builder
+		for _, item := range m.results.Items() {
+			vi, ok := item.(shared.VideoItem)
+			if !ok {
+				continue
+			}
+			url := shared.BestThumbnail(vi.Video)
+			if url == "" || m.transmitted[url] {
+				continue
+			}
+			transmitStr, pl := m.imgR.Get(url)
+			if pl != "" && transmitStr != "" {
+				m.transmitted[url] = true
+				tx.WriteString(transmitStr)
+			}
+		}
+		if tx.Len() > 0 {
+			view = tx.String() + view
+		}
+	}
+
+	return view
 }
 
 // searchCmd wraps SearchFunc into a tea.Cmd with the internal resultMsg.
