@@ -171,7 +171,7 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 
 	var thumbList *shared.ThumbList
 	if cfg.Music.Thumbnails {
-		thumbList = shared.NewThumbList(ytimage.NewRenderer(), albumThumbURL)
+		thumbList = shared.NewThumbList(ytimage.NewRenderer(), musicThumbURL)
 	}
 
 	thumbH := cfg.Music.ThumbnailHeight

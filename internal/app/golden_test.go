@@ -410,10 +410,12 @@ func TestGolden_Music_Search_WithThumbnails(t *testing.T) {
 		authenticated: true,
 		searchFn: func(_ context.Context, query, cont string) (*youtube.MusicSearchResult, error) {
 			return &youtube.MusicSearchResult{
-				TopResult: &youtube.MusicItem{Title: "Top Hit Song", Subtitle: "Famous Artist", Type: youtube.MusicSong, VideoID: "top1"},
+				TopResult: &youtube.MusicItem{Title: "Top Hit Song", Subtitle: "Famous Artist", Type: youtube.MusicSong, VideoID: "top1",
+					Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/top1.jpg", Width: 226, Height: 226}}},
 				Shelves: []youtube.MusicShelf{
 					{Title: "Songs", Items: []youtube.MusicItem{
-						{Title: "Song One", Subtitle: "Artist A", Type: youtube.MusicSong},
+						{Title: "Song One", Subtitle: "Artist A", Type: youtube.MusicSong,
+							Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/song1.jpg", Width: 226, Height: 226}}},
 					}},
 					{Title: "Albums", Items: []youtube.MusicItem{
 						{Title: "Great Album", Subtitle: "Album • Artist A • 2024", Type: youtube.MusicAlbum, BrowseID: "album1",

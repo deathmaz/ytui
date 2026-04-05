@@ -60,16 +60,21 @@ func newMusicDelegate(imgR *ytimage.Renderer, thumbRows int) list.ItemDelegate {
 	if imgR == nil || thumbRows <= 0 {
 		return musicDelegate{}
 	}
-	return shared.NewThumbDelegate(imgR, thumbRows, albumThumbURL, renderMusicText)
+	return shared.NewThumbDelegate(imgR, thumbRows, musicThumbURL, renderMusicText)
 }
 
-// albumThumbURL extracts a thumbnail URL from album items only.
-func albumThumbURL(item list.Item) string {
+// musicThumbURL extracts a thumbnail URL from music items that have thumbnails
+// (songs, albums, videos). Returns "" for artists and playlists.
+func musicThumbURL(item list.Item) string {
 	mi, ok := item.(musicItem)
-	if !ok || mi.item.Type != youtube.MusicAlbum {
+	if !ok {
 		return ""
 	}
-	return shared.BestThumbnailURL(mi.item.Thumbnails)
+	switch mi.item.Type {
+	case youtube.MusicSong, youtube.MusicAlbum, youtube.MusicVideo:
+		return shared.BestThumbnailURL(mi.item.Thumbnails)
+	}
+	return ""
 }
 
 func renderMusicText(w io.Writer, item list.Item, m list.Model, isSelected bool, width int) {
