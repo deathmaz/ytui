@@ -867,6 +867,74 @@ func TestBothModes_SearchFocusParity(t *testing.T) {
 	}
 }
 
+// TestVideoMode_ThumbnailLoadedWhileDetailTabActive verifies that when a list
+// thumbnail fetch completes while a video detail tab is active, the result is
+// still cached by the shared ThumbList (not swallowed by the detail view).
+// Regression: the detail view's handler blindly stored ANY ThumbnailLoadedMsg
+// without checking HandleLoaded, causing list thumbnails to be lost and wrong
+// images to appear.
+func TestVideoMode_ThumbnailLoadedWhileDetailTabActive(t *testing.T) {
+	cfg := testConfig()
+	cfg.Search.Thumbnails = true
+	cfg.Search.ThumbnailHeight = 5
+	m := New(&mockYTClient{authenticated: true}, cfg, Options{})
+
+	// Switch to a video tab so the detail view is active
+	m.activeView = ViewVideoTab
+
+	if m.listThumbList == nil {
+		t.Fatal("expected listThumbList to be non-nil")
+	}
+	imgR := m.listThumbList.Renderer()
+
+	// Mark URL as inflight on the LIST renderer
+	imgR.FetchCmd("https://fake.test/list-thumb.jpg", 20, 5)
+
+	// Send ThumbnailLoadedMsg while detail tab is active
+	m.Update(ytimage.ThumbnailLoadedMsg{
+		URL:         "https://fake.test/list-thumb.jpg",
+		TransmitStr: "list-tx",
+		Placeholder: "list-pl",
+	})
+
+	// Verify the list renderer cached it (via app-level HandleMsg)
+	_, pl := imgR.Get("https://fake.test/list-thumb.jpg")
+	if pl != "list-pl" {
+		t.Errorf("expected list thumbnail cached while detail tab active, got placeholder=%q", pl)
+	}
+}
+
+// TestVideoMode_FeedThumbnailLoadedMsgStores verifies that ThumbnailLoadedMsg
+// is cached by the app-level handler (which handles it globally for all views).
+func TestVideoMode_FeedThumbnailLoadedMsgStores(t *testing.T) {
+	cfg := testConfig()
+	cfg.Search.Thumbnails = true
+	cfg.Search.ThumbnailHeight = 5
+	m := New(&mockYTClient{authenticated: true}, cfg, Options{})
+
+	// Switch to feed so the test covers the feed-active scenario.
+	m.activeView = ViewFeed
+
+	if m.listThumbList == nil {
+		t.Fatal("expected listThumbList to be non-nil")
+	}
+	imgR := m.listThumbList.Renderer()
+
+	// Mark a URL as inflight so HandleLoaded accepts the message.
+	imgR.FetchCmd("https://fake.test/feed1.jpg", 20, 5)
+
+	m.Update(ytimage.ThumbnailLoadedMsg{
+		URL:         "https://fake.test/feed1.jpg",
+		TransmitStr: "tx-data",
+		Placeholder: "pl-data",
+	})
+
+	_, pl := imgR.Get("https://fake.test/feed1.jpg")
+	if pl != "pl-data" {
+		t.Errorf("expected thumbnail cached via app-level HandleMsg, got placeholder=%q", pl)
+	}
+}
+
 // TestMusicMode_ThumbnailLoadedMsgStoresInListRenderer verifies that when a
 // ThumbnailLoadedMsg arrives, it is stored in the list renderer via
 // thumbList.HandleMsg. Regression test: the handler was missing the HandleMsg

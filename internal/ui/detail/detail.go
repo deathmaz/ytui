@@ -214,17 +214,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ytimage.ThumbnailLoadedMsg:
-		m.thumbPending = false
-		if msg.Err == nil && msg.Placeholder != "" {
-			m.imgR.Store(msg.URL, msg.TransmitStr, msg.Placeholder)
-			m.thumbTransmit = msg.TransmitStr
-			m.thumbPlace = msg.Placeholder
-			cmds = append(cmds, scheduleClearTransmit())
-		} else {
-			m.thumbFailed = true
-		}
-		if m.video != nil {
-			m.infoViewport.SetContent(m.renderInfo())
+		// Only process if this fetch was initiated by our renderer
+		// (not by a list thumbnail renderer sharing the message bus).
+		if m.imgR != nil && m.imgR.HandleLoaded(msg) {
+			m.thumbPending = false
+			if msg.Err == nil && msg.Placeholder != "" {
+				m.thumbTransmit = msg.TransmitStr
+				m.thumbPlace = msg.Placeholder
+				cmds = append(cmds, scheduleClearTransmit())
+			} else {
+				m.thumbFailed = true
+			}
+			if m.video != nil {
+				m.infoViewport.SetContent(m.renderInfo())
+			}
 		}
 		return m, tea.Batch(cmds...)
 

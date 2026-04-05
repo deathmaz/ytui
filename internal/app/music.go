@@ -1016,13 +1016,13 @@ func (m *MusicModel) renderHome() string {
 	}
 
 	activeList := ""
-	var activeItems []list.Item
+	var visibleItems []list.Item
 	if m.homeSubIdx < len(m.homeSubs) {
 		activeList = m.homeSubs[m.homeSubIdx].list.View()
-		activeItems = m.homeSubs[m.homeSubIdx].list.Items()
+		visibleItems = shared.VisibleItems(m.homeSubs[m.homeSubIdx].list)
 	}
 	view := lipgloss.JoinVertical(lipgloss.Left, subBar, activeList)
-	return m.thumbList.WrapView(activeItems, view)
+	return m.thumbList.WrapView(visibleItems, view)
 }
 
 func (m *MusicModel) renderLibrary() string {
@@ -1050,10 +1050,10 @@ func (m *MusicModel) renderLibrary() string {
 	}
 
 	activeList := ""
-	var activeItems []list.Item
+	var visibleItems []list.Item
 	if m.librarySubIdx < len(m.librarySubs) {
 		activeList = m.librarySubs[m.librarySubIdx].list.View()
-		activeItems = m.librarySubs[m.librarySubIdx].list.Items()
+		visibleItems = shared.VisibleItems(m.librarySubs[m.librarySubIdx].list)
 	}
 
 	var sections []string
@@ -1062,7 +1062,7 @@ func (m *MusicModel) renderLibrary() string {
 		sections = append(sections, hint)
 	}
 	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
-	return m.thumbList.WrapView(activeItems, view)
+	return m.thumbList.WrapView(visibleItems, view)
 }
 
 func (m *MusicModel) renderSearch() string {
@@ -1116,10 +1116,10 @@ func (m *MusicModel) renderArtistPage(tab *musicTab) string {
 	}
 
 	activeList := ""
-	var activeItems []list.Item
+	var visibleItems []list.Item
 	if tab.activeSubTab < len(tab.artistSubs) {
 		activeList = tab.artistSubs[tab.activeSubTab].list.View()
-		activeItems = tab.artistSubs[tab.activeSubTab].list.Items()
+		visibleItems = shared.VisibleItems(tab.artistSubs[tab.activeSubTab].list)
 	}
 
 	var sections []string
@@ -1128,7 +1128,7 @@ func (m *MusicModel) renderArtistPage(tab *musicTab) string {
 		sections = append(sections, hint)
 	}
 	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
-	return m.thumbList.WrapView(activeItems, view)
+	return m.thumbList.WrapView(visibleItems, view)
 }
 
 func (m *MusicModel) renderAlbumPage(tab *musicTab) string {

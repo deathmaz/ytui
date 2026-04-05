@@ -14,17 +14,15 @@ import (
 // ThumbList manages Kitty image transmit sequences for lists with thumbnails.
 // One ThumbList per renderer, shared across all lists using that renderer.
 type ThumbList struct {
-	imgR        *ytimage.Renderer
-	transmitted map[string]bool
-	getURL      func(list.Item) string
+	imgR   *ytimage.Renderer
+	getURL func(list.Item) string
 }
 
 // NewThumbList creates a new ThumbList with the given renderer and URL extractor.
 func NewThumbList(imgR *ytimage.Renderer, getURL func(list.Item) string) *ThumbList {
 	return &ThumbList{
-		imgR:        imgR,
-		transmitted: make(map[string]bool),
-		getURL:      getURL,
+		imgR:   imgR,
+		getURL: getURL,
 	}
 }
 
@@ -48,8 +46,28 @@ func (t *ThumbList) HandleMsg(msg tea.Msg) bool {
 	return false
 }
 
-// WrapView prepends Kitty transmit sequences for cached but not-yet-transmitted
-// images to the rendered view string.
+// VisibleItems returns the slice of items currently shown on screen based on
+// the list's paginator.
+func VisibleItems(l list.Model) []list.Item {
+	items := l.Items()
+	if len(items) == 0 {
+		return nil
+	}
+	p := l.Paginator
+	start := p.Page * p.PerPage
+	end := start + p.PerPage
+	if start >= len(items) {
+		return nil
+	}
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end]
+}
+
+// WrapView prepends Kitty image sequences for visible items. Clears all
+// images and re-transmits visible ones each frame to prevent stale images
+// from other views. Only pass VISIBLE items (use VisibleItems).
 func (t *ThumbList) WrapView(items []list.Item, view string) string {
 	if t == nil || t.imgR == nil {
 		return view
@@ -57,17 +75,16 @@ func (t *ThumbList) WrapView(items []list.Item, view string) string {
 	var tx strings.Builder
 	for _, item := range items {
 		url := t.getURL(item)
-		if url == "" || t.transmitted[url] {
+		if url == "" {
 			continue
 		}
 		transmitStr, pl := t.imgR.Get(url)
 		if pl != "" && transmitStr != "" {
-			t.transmitted[url] = true
 			tx.WriteString(transmitStr)
 		}
 	}
 	if tx.Len() > 0 {
-		return tx.String() + view
+		return ytimage.DeleteAll() + tx.String() + view
 	}
 	return view
 }
@@ -168,8 +185,7 @@ func (d thumbDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 }
 
 // RenderWithThumb renders a thumbnail placeholder grid on the left and text
-// lines on the right. This is the shared layout helper used by all thumbnail
-// delegates.
+// lines on the right.
 func RenderWithThumb(w io.Writer, thumbLines, textLines []string, thumbCols, thumbRows int) {
 	emptyThumb := strings.Repeat(" ", thumbCols)
 	for i := 0; i < thumbRows; i++ {

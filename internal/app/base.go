@@ -10,7 +10,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/auth"
-	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/search"
 	"github.com/deathmaz/ytui/internal/ui/urlinput"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -136,11 +135,8 @@ type ModalView interface {
 	View() string
 }
 
-var clearKittyOnce bool
-
 // RenderShell checks zero-width and modal overlays, then composes the standard
-// tab/content/status/help layout. On the first call, it prepends a Kitty
-// "delete all images" sequence to clear stale thumbnails from previous sessions.
+// tab/content/status/help layout.
 func RenderShell(
 	width int,
 	modals []ModalView,
@@ -157,12 +153,7 @@ func RenderShell(
 			return modal.View()
 		}
 	}
-	view := composeSections(tabsFn(), contentFn(), statusLine, helpBar)
-	if !clearKittyOnce {
-		clearKittyOnce = true
-		view = ytimage.DeleteAll() + view
-	}
-	return view
+	return composeSections(tabsFn(), contentFn(), statusLine, helpBar)
 }
 
 // GlobalKeyAction represents a global key that all modes handle.

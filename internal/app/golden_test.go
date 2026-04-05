@@ -145,6 +145,28 @@ func TestGolden_Video_Feed_WithItems(t *testing.T) {
 	waitThenCapture(t, tm, "New Release")
 }
 
+func TestGolden_Video_Feed_WithThumbnails(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getFeedFn: func(_ context.Context, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "f1", Title: "New Release: Go 1.22", ChannelName: "Go Team", ViewCount: "50K views", PublishedAt: "1 hour ago", DurationStr: "5:30",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/f1.jpg", Width: 320}}},
+					{ID: "f2", Title: "Building CLI Tools in Go", ChannelName: "Gopher Academy", ViewCount: "12K views", PublishedAt: "3 hours ago", DurationStr: "22:10",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/f2.jpg", Width: 320}}},
+				},
+			}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Search.Thumbnails = true
+	cfg.Search.ThumbnailHeight = 5
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+	sendKey(tm, "1")
+	waitThenCapture(t, tm, "New Release")
+}
+
 func TestGolden_Video_Subs_Unauthenticated(t *testing.T) {
 	tm := newTestVideoProgram(t, &mockYTClient{authenticated: false})
 	sendKey(tm, "2")

@@ -67,6 +67,7 @@ type Model struct {
 	subs          subs.Model
 	ytClient      youtube.Client
 	imgR          *ytimage.Renderer
+	listThumbList *shared.ThumbList
 	picker        picker.Model
 	urlInput      urlinput.Model
 	cfg           *config.Config
@@ -92,8 +93,8 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 	h := help.New()
 	h.ShortSeparator = "  "
 	imgR := ytimage.NewRenderer()
-	searchImgR := newSearchImgR(cfg)
-	s := search.New(newVideoSearchConfig(client, searchImgR, cfg))
+	thumbList, listDelegate := newVideoListSetup(cfg)
+	s := search.New(newVideoSearchConfig(client, thumbList, listDelegate))
 	if opts.SearchQuery != "" {
 		s.SetQuery(opts.SearchQuery)
 	}
@@ -102,10 +103,11 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 		keys:        DefaultKeyMap(),
 		help:        h,
 		search:      s,
-		feed:        feed.New(client),
+		feed:        feed.New(client, listDelegate, thumbList),
 		subs:        subs.New(client),
-		imgR:        imgR,
-		ytClient:    client,
+		imgR:          imgR,
+		listThumbList: thumbList,
+		ytClient:      client,
 		picker:      picker.New(),
 		urlInput:    urlinput.New(),
 		cfg:         cfg,
@@ -115,11 +117,21 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 	}
 }
 
-func newSearchImgR(cfg *config.Config) *ytimage.Renderer {
-	if cfg.Search.Thumbnails {
-		return ytimage.NewRenderer()
+// newVideoListSetup creates the shared thumbnail infrastructure for video-mode
+// lists (search and feed). Returns nil ThumbList and plain delegate when
+// thumbnails are disabled.
+func newVideoListSetup(cfg *config.Config) (*shared.ThumbList, list.ItemDelegate) {
+	if !cfg.Search.Thumbnails {
+		return nil, shared.VideoDelegate{}
 	}
-	return nil
+	thumbH := cfg.Search.ThumbnailHeight
+	if thumbH <= 0 {
+		thumbH = 5
+	}
+	imgR := ytimage.NewRenderer()
+	thumbList := shared.NewThumbList(imgR, shared.VideoThumbURL)
+	delegate := shared.NewThumbDelegate(imgR, thumbH, shared.VideoThumbURL, shared.RenderVideoText)
+	return thumbList, delegate
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -293,8 +305,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return err
 				}
 				m.ytClient = newClient
-				m.search = search.New(newVideoSearchConfig(newClient, newSearchImgR(m.cfg), m.cfg))
-				m.feed = feed.New(newClient)
+				tl, dl := newVideoListSetup(m.cfg)
+				m.listThumbList = tl
+				m.search = search.New(newVideoSearchConfig(newClient, m.listThumbList, dl))
+				m.feed = feed.New(newClient, dl, m.listThumbList)
 				m.subs = subs.New(newClient)
 				return nil
 			},
@@ -314,6 +328,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.status.HandleClear(msg) {
 			m.resizeViews()
 		}
+
+	case ytimage.ThumbnailLoadedMsg:
+		// Always route list thumbnail messages to the shared ThumbList,
+		// regardless of which view is active. This ensures fetches that
+		// complete while a video detail tab is active still get cached.
+		m.listThumbList.HandleMsg(msg)
 	}
 
 	// Delegate to active view
@@ -653,19 +673,7 @@ func (m *Model) renderContent() string {
 	return ""
 }
 
-func newVideoSearchConfig(client youtube.Client, imgR *ytimage.Renderer, cfg *config.Config) search.Config {
-	var delegate list.ItemDelegate
-	var thumbList *shared.ThumbList
-	if cfg.Search.Thumbnails && imgR != nil {
-		thumbH := cfg.Search.ThumbnailHeight
-		if thumbH <= 0 {
-			thumbH = 5
-		}
-		delegate = shared.NewThumbDelegate(imgR, thumbH, shared.VideoThumbURL, shared.RenderVideoText)
-		thumbList = shared.NewThumbList(imgR, shared.VideoThumbURL)
-	} else {
-		delegate = shared.VideoDelegate{}
-	}
+func newVideoSearchConfig(client youtube.Client, thumbList *shared.ThumbList, delegate list.ItemDelegate) search.Config {
 	return search.Config{
 		Placeholder: "Search YouTube...",
 		Delegate:    delegate,

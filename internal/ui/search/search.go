@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 )
@@ -202,12 +201,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, m.loadMore()
 		}
 
-	case ytimage.ThumbnailLoadedMsg:
-		if m.thumbList != nil {
-			m.thumbList.HandleMsg(msg)
-		}
-		return m, nil
-
 	case resultMsg:
 		m.searching = false
 		m.loadingMore = false
@@ -273,7 +266,7 @@ func (m Model) View() string {
 	)
 
 	if m.thumbList != nil {
-		view = m.thumbList.WrapView(m.results.Items(), view)
+		view = m.thumbList.WrapView(shared.VisibleItems(m.results), view)
 	}
 
 	return view

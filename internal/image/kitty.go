@@ -84,13 +84,18 @@ func EncodeForKitty(img image.Image, cols, rows int) (transmitStr, placeholderSt
 // buildPlaceholders creates the U+10EEEE grid with proper row diacritics.
 // First cell of each row gets a row diacritic; remaining cells auto-inherit.
 func buildPlaceholders(id uint32, cols, rows int) string {
+	// Encode image ID as 24-bit color (R,G,B) to support >255 unique images.
+	// 256-color mode (\033[38;5;Nm) only supports N=0-255, causing ID
+	// collisions in sessions with many thumbnails.
+	r := (id >> 16) & 0xFF
+	g := (id >> 8) & 0xFF
+	bl := id & 0xFF
 	var b strings.Builder
 	for row := 0; row < rows; row++ {
-		fmt.Fprintf(&b, "\033[38;5;%dm", id)
+		fmt.Fprintf(&b, "\033[38;2;%d;%d;%dm", r, g, bl)
 		for col := 0; col < cols; col++ {
 			b.WriteRune('\U0010EEEE')
 			if col == 0 && row < len(diacritics) {
-				// First cell of each row: add row diacritic
 				b.WriteRune(diacritics[row])
 			}
 		}

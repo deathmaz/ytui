@@ -38,16 +38,18 @@ type Model struct {
 	width       int
 	height      int
 	client      youtube.Client
+	thumbList   *shared.ThumbList
 }
 
 // New creates a new feed view model.
-func New(client youtube.Client) Model {
-	l := shared.NewList(shared.VideoDelegate{})
+func New(client youtube.Client, delegate list.ItemDelegate, thumbList *shared.ThumbList) Model {
+	l := shared.NewList(delegate)
 
 	return Model{
-		list:    l,
-		spinner: styles.NewSpinner(),
-		client:  client,
+		list:      l,
+		spinner:   styles.NewSpinner(),
+		client:    client,
+		thumbList: thumbList,
 	}
 }
 
@@ -142,7 +144,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			cmd := m.list.SetItems(newItems)
 			cmds = append(cmds, cmd)
 		}
-		return m, tea.Batch(cmds...)
+		// Fall through to trigger thumbnail fetches for new items.
 
 	case tea.KeyMsg:
 		if !m.loading {
@@ -161,6 +163,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				cmds = append(cmds, m.loadMore())
 			}
 		}
+		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -168,7 +171,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
 		}
+		return m, tea.Batch(cmds...)
 	}
+
+	// Forward to list so the delegate's Update triggers thumbnail fetches
+	// (reached by FeedLoadedMsg fall-through and unknown message types).
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
 }
@@ -184,5 +194,5 @@ func (m Model) View() string {
 		return styles.Accent.Render("Feed error: "+m.err.Error()) +
 			"\n\n" + styles.Dim.Render("Press 'a' to authenticate")
 	}
-	return m.list.View()
+	return m.thumbList.WrapView(shared.VisibleItems(m.list), m.list.View())
 }

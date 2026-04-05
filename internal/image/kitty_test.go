@@ -67,9 +67,9 @@ func TestEncodeForKitty(t *testing.T) {
 	})
 
 	t.Run("PlaceholderHasForegroundColor", func(t *testing.T) {
-		// Must contain foreground color escape for image ID
-		if !strings.Contains(pl, "\033[38;5;") {
-			t.Error("placeholder missing foreground color escape")
+		// Must contain 24-bit foreground color escape for image ID
+		if !strings.Contains(pl, "\033[38;2;") {
+			t.Error("placeholder missing 24-bit foreground color escape")
 		}
 		// Must contain color reset
 		if !strings.Contains(pl, "\033[39m") {
