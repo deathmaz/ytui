@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -25,21 +24,16 @@ const (
 )
 
 // SearchResult is the concrete return type for search operations.
-// Callers must populate Items and NextToken — the compiler enforces
-// that these fields exist even if empty.
 type SearchResult struct {
 	Items     []list.Item
 	NextToken string
 	Err       error
 }
 
-// SearchFunc performs a search. The search model calls this in a goroutine
-// and converts the result into an internal message. Callers cannot return
-// an arbitrary tea.Msg — they must return a SearchResult.
+// SearchFunc performs a search.
 type SearchFunc func(ctx context.Context, query, pageToken string) SearchResult
 
 // SelectFunc is called synchronously when Enter is pressed on a result.
-// Returns the message to emit, or nil for no action.
 type SelectFunc func(item list.Item) tea.Msg
 
 // resultMsg is internal — only created by the search model from SearchResult.
@@ -54,7 +48,7 @@ type Config struct {
 	Delegate    list.ItemDelegate
 	SearchFn    SearchFunc
 	SelectFn    SelectFunc
-	ImgR        *ytimage.Renderer // optional: enables thumbnail caching for search results
+	ThumbList   *shared.ThumbList // optional: manages thumbnails for search results
 }
 
 // Model is a reusable search view with input, spinner, and results list.
@@ -72,8 +66,7 @@ type Model struct {
 	height      int
 	searchFn    SearchFunc
 	selectFn    SelectFunc
-	imgR        *ytimage.Renderer
-	transmitted map[string]bool // tracks which images have been transmitted to Kitty
+	thumbList   *shared.ThumbList
 }
 
 // New creates a new search model with the given configuration.
@@ -89,21 +82,15 @@ func New(cfg Config) Model {
 
 	l := shared.NewList(cfg.Delegate)
 
-	var transmitted map[string]bool
-	if cfg.ImgR != nil {
-		transmitted = make(map[string]bool)
-	}
-
 	return Model{
-		input:       ti,
-		results:     l,
-		spinner:     styles.NewSpinner(),
-		keys:        defaultKeyMap(),
-		focused:     focusInput,
-		searchFn:    cfg.SearchFn,
-		selectFn:    cfg.SelectFn,
-		imgR:        cfg.ImgR,
-		transmitted: transmitted,
+		input:     ti,
+		results:   l,
+		spinner:   styles.NewSpinner(),
+		keys:      defaultKeyMap(),
+		focused:   focusInput,
+		searchFn:  cfg.SearchFn,
+		selectFn:  cfg.SelectFn,
+		thumbList: cfg.ThumbList,
 	}
 }
 
@@ -216,13 +203,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case ytimage.ThumbnailLoadedMsg:
-		if m.imgR != nil {
-			if msg.Err == nil && msg.Placeholder != "" {
-				m.imgR.Store(msg.URL, msg.TransmitStr, msg.Placeholder)
-			} else {
-				// Clear in-flight flag so the fetch can be retried.
-				m.imgR.ClearInflight(msg.URL)
-			}
+		if m.thumbList != nil {
+			m.thumbList.HandleMsg(msg)
 		}
 		return m, nil
 
@@ -290,36 +272,13 @@ func (m Model) View() string {
 		m.results.View(),
 	)
 
-	// Prepend Kitty transmit sequences for cached images that haven't
-	// been transmitted yet. This keeps APC escapes out of the list's
-	// delegate output (which would break layout measurement) and
-	// matches the detail view's pattern.
-	if m.transmitted != nil {
-		var tx strings.Builder
-		for _, item := range m.results.Items() {
-			vi, ok := item.(shared.VideoItem)
-			if !ok {
-				continue
-			}
-			url := shared.BestThumbnail(vi.Video)
-			if url == "" || m.transmitted[url] {
-				continue
-			}
-			transmitStr, pl := m.imgR.Get(url)
-			if pl != "" && transmitStr != "" {
-				m.transmitted[url] = true
-				tx.WriteString(transmitStr)
-			}
-		}
-		if tx.Len() > 0 {
-			view = tx.String() + view
-		}
+	if m.thumbList != nil {
+		view = m.thumbList.WrapView(m.results.Items(), view)
 	}
 
 	return view
 }
 
-// searchCmd wraps SearchFunc into a tea.Cmd with the internal resultMsg.
 func (m *Model) searchCmd(query, pageToken string, isAppend bool) tea.Cmd {
 	fn := m.searchFn
 	return func() tea.Msg {

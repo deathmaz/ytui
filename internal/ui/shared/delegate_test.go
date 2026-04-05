@@ -37,26 +37,10 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
-func TestVideoDelegate_Height_Default(t *testing.T) {
+func TestVideoDelegate_Height(t *testing.T) {
 	d := VideoDelegate{}
 	if got := d.Height(); got != 2 {
 		t.Errorf("Height() = %d, want 2", got)
-	}
-}
-
-func TestVideoDelegate_Height_WithThumbnails(t *testing.T) {
-	d := NewVideoDelegate(nil, 5)
-	if got := d.Height(); got != 5 {
-		t.Errorf("Height() = %d, want 5", got)
-	}
-}
-
-func TestVideoDelegate_Height_CustomValues(t *testing.T) {
-	for _, rows := range []int{3, 5, 7, 10} {
-		d := NewVideoDelegate(nil, rows)
-		if got := d.Height(); got != rows {
-			t.Errorf("Height() with ThumbRows=%d = %d, want %d", rows, got, rows)
-		}
 	}
 }
 
@@ -67,7 +51,7 @@ func TestVideoDelegate_Spacing(t *testing.T) {
 	}
 }
 
-func TestVideoDelegate_Render_Default(t *testing.T) {
+func TestVideoDelegate_Render(t *testing.T) {
 	d := VideoDelegate{}
 	l := list.New(nil, d, 80, 24)
 	l.SetItems([]list.Item{
@@ -96,9 +80,17 @@ func TestVideoDelegate_Render_Default(t *testing.T) {
 	}
 }
 
-func TestVideoDelegate_Render_WithThumbnails_NoImage(t *testing.T) {
-	// With ThumbRows set but no ImgR, should render with empty thumbnail space
-	d := NewVideoDelegate(nil, 5)
+func TestThumbDelegate_Height(t *testing.T) {
+	for _, rows := range []int{3, 5, 7, 10} {
+		d := NewThumbDelegate(nil, rows, VideoThumbURL, RenderVideoText)
+		if got := d.Height(); got != rows {
+			t.Errorf("Height() with thumbRows=%d = %d, want %d", rows, got, rows)
+		}
+	}
+}
+
+func TestThumbDelegate_Render_NoImage(t *testing.T) {
+	d := NewThumbDelegate(nil, 5, VideoThumbURL, RenderVideoText)
 	l := list.New(nil, d, 80, 24)
 	l.SetItems([]list.Item{
 		VideoItem{Video: youtube.Video{
@@ -123,14 +115,25 @@ func TestVideoDelegate_Render_WithThumbnails_NoImage(t *testing.T) {
 	}
 }
 
-func TestVideoDelegate_ThumbCols(t *testing.T) {
-	d := NewVideoDelegate(nil, 5)
-	if got := d.thumbCols(); got != 20 {
-		t.Errorf("thumbCols() with ThumbRows=5 = %d, want 20", got)
+func TestRenderWithThumb(t *testing.T) {
+	var buf bytes.Buffer
+	thumbLines := []string{"AAA", "BBB"}
+	textLines := []string{"Title", "Meta"}
+	RenderWithThumb(&buf, thumbLines, textLines, 3, 4)
+
+	lines := strings.Split(buf.String(), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines, got %d", len(lines))
 	}
-	d = NewVideoDelegate(nil, 10)
-	if got := d.thumbCols(); got != 40 {
-		t.Errorf("thumbCols() with ThumbRows=10 = %d, want 40", got)
+	if !strings.HasPrefix(lines[0], "AAA") {
+		t.Errorf("line 0 should start with thumb: %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "Title") {
+		t.Errorf("line 0 should contain text: %q", lines[0])
+	}
+	// Lines 2-3 should have empty thumb space (3 spaces)
+	if !strings.HasPrefix(lines[2], "   ") {
+		t.Errorf("line 2 should have empty thumb space: %q", lines[2])
 	}
 }
 
@@ -179,5 +182,26 @@ func TestBestThumbnail(t *testing.T) {
 				t.Errorf("BestThumbnail() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBestThumbnailURL(t *testing.T) {
+	thumbs := []youtube.Thumbnail{
+		{URL: "http://small.jpg", Width: 120},
+		{URL: "http://large.jpg", Width: 480},
+	}
+	if got := BestThumbnailURL(thumbs); got != "http://large.jpg" {
+		t.Errorf("BestThumbnailURL() = %q, want http://large.jpg", got)
+	}
+	if got := BestThumbnailURL(nil); got != "" {
+		t.Errorf("BestThumbnailURL(nil) = %q, want empty", got)
+	}
+}
+
+func TestVideoThumbURL(t *testing.T) {
+	item := VideoItem{Video: youtube.Video{ID: "test123"}}
+	got := VideoThumbURL(item)
+	if got != "https://i.ytimg.com/vi/test123/hqdefault.jpg" {
+		t.Errorf("VideoThumbURL() = %q", got)
 	}
 }

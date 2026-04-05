@@ -655,19 +655,21 @@ func (m *Model) renderContent() string {
 
 func newVideoSearchConfig(client youtube.Client, imgR *ytimage.Renderer, cfg *config.Config) search.Config {
 	var delegate list.ItemDelegate
+	var thumbList *shared.ThumbList
 	if cfg.Search.Thumbnails && imgR != nil {
 		thumbH := cfg.Search.ThumbnailHeight
 		if thumbH <= 0 {
 			thumbH = 5
 		}
-		delegate = shared.NewVideoDelegate(imgR, thumbH)
+		delegate = shared.NewThumbDelegate(imgR, thumbH, shared.VideoThumbURL, shared.RenderVideoText)
+		thumbList = shared.NewThumbList(imgR, shared.VideoThumbURL)
 	} else {
 		delegate = shared.VideoDelegate{}
 	}
 	return search.Config{
 		Placeholder: "Search YouTube...",
 		Delegate:    delegate,
-		ImgR:        imgR,
+		ThumbList:   thumbList,
 		SearchFn: func(ctx context.Context, query, pageToken string) search.SearchResult {
 			page, err := client.Search(ctx, query, pageToken)
 			if err != nil {

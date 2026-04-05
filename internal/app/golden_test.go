@@ -383,6 +383,33 @@ func TestGolden_Music_Search_WithResults(t *testing.T) {
 	waitThenCapture(t, tm, "Top Hit Song")
 }
 
+func TestGolden_Music_Search_WithThumbnails(t *testing.T) {
+	mc := &mockMusicClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, cont string) (*youtube.MusicSearchResult, error) {
+			return &youtube.MusicSearchResult{
+				TopResult: &youtube.MusicItem{Title: "Top Hit Song", Subtitle: "Famous Artist", Type: youtube.MusicSong, VideoID: "top1"},
+				Shelves: []youtube.MusicShelf{
+					{Title: "Songs", Items: []youtube.MusicItem{
+						{Title: "Song One", Subtitle: "Artist A", Type: youtube.MusicSong},
+					}},
+					{Title: "Albums", Items: []youtube.MusicItem{
+						{Title: "Great Album", Subtitle: "Album • Artist A • 2024", Type: youtube.MusicAlbum, BrowseID: "album1",
+							Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/album1.jpg", Width: 226, Height: 226}}},
+						{Title: "Another Album", Subtitle: "Album • Artist B • 2023", Type: youtube.MusicAlbum, BrowseID: "album2",
+							Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/album2.jpg", Width: 226, Height: 226}}},
+					}},
+				},
+			}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Music.Thumbnails = true
+	cfg.Music.ThumbnailHeight = 5
+	tm := newTestMusicProgramFull(t, nil, mc, nil, cfg, Options{SearchQuery: "album test"})
+	waitThenCapture(t, tm, "Great Album")
+}
+
 func TestGolden_Music_StartupWarning(t *testing.T) {
 	tm := newTestMusicProgramWithOpts(t, nil, nil, nil, Options{
 		Warning: "client params scrape failed: music: connection refused",

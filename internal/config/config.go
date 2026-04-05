@@ -14,7 +14,8 @@ type Config struct {
 	Player   PlayerConfig   `toml:"player"`
 	Download DownloadConfig `toml:"download"`
 	Auth     AuthConfig     `toml:"auth"`
-	Search   SearchConfig   `toml:"search"`
+	Search   ThumbnailConfig `toml:"search"`
+	Music    ThumbnailConfig `toml:"music"`
 }
 
 // GeneralConfig holds general settings.
@@ -70,9 +71,9 @@ type AuthConfig struct {
 	AuthOnStartup bool   `toml:"auth_on_startup"`
 }
 
-// SearchConfig configures search result display.
-type SearchConfig struct {
-	Thumbnails      bool `toml:"thumbnails"`        // show thumbnails in search results (requires Kitty terminal)
+// ThumbnailConfig configures thumbnail display in lists.
+type ThumbnailConfig struct {
+	Thumbnails      bool `toml:"thumbnails"`        // show thumbnails in lists (requires Kitty terminal)
 	ThumbnailHeight int  `toml:"thumbnail_height"`  // thumbnail height in terminal rows (default: 5)
 }
 
@@ -96,7 +97,10 @@ func Default() *Config {
 			Browser:       "brave",
 			AuthOnStartup: false,
 		},
-		Search: SearchConfig{
+		Search: ThumbnailConfig{
+			ThumbnailHeight: 5,
+		},
+		Music: ThumbnailConfig{
 			ThumbnailHeight: 5,
 		},
 	}

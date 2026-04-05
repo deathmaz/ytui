@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -22,26 +23,8 @@ func (d musicDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	if !ok {
 		return
 	}
-
-	it := mi.item
 	isSelected := index == m.Index()
-
-	cursor := "  "
-	if isSelected {
-		cursor = "> "
-	}
-
-	// Type icon
-	icon := typeIcon(it.Type)
-
-	titleStyle := styles.Title
-	if isSelected {
-		titleStyle = styles.SelectedTitle
-	}
-	title := titleStyle.Render(shared.Truncate(icon+" "+it.Title, m.Width()-4))
-
-	meta := styles.Dim.Render(shared.Truncate(it.Subtitle, m.Width()-4))
-
+	cursor, title, meta := musicTextParts(mi.item, isSelected, m.Width()-4)
 	fmt.Fprintf(w, "%s%s\n%s  %s", cursor, title, "  ", meta)
 }
 
@@ -69,6 +52,48 @@ func (d musicTrackDelegate) Render(w io.Writer, m list.Model, index int, item li
 	title := titleStyle.Render(shared.Truncate(mi.item.Title, m.Width()-20))
 	dur := styles.Dim.Render(mi.item.Subtitle)
 	fmt.Fprintf(w, "%s♪ %s  %s", cursor, title, dur)
+}
+
+// newMusicDelegate returns a thumbnail-aware delegate when thumbnails are
+// enabled, otherwise the plain text-only musicDelegate.
+func newMusicDelegate(imgR *ytimage.Renderer, thumbRows int) list.ItemDelegate {
+	if imgR == nil || thumbRows <= 0 {
+		return musicDelegate{}
+	}
+	return shared.NewThumbDelegate(imgR, thumbRows, albumThumbURL, renderMusicText)
+}
+
+// albumThumbURL extracts a thumbnail URL from album items only.
+func albumThumbURL(item list.Item) string {
+	mi, ok := item.(musicItem)
+	if !ok || mi.item.Type != youtube.MusicAlbum {
+		return ""
+	}
+	return shared.BestThumbnailURL(mi.item.Thumbnails)
+}
+
+func renderMusicText(w io.Writer, item list.Item, m list.Model, isSelected bool, width int) {
+	mi, ok := item.(musicItem)
+	if !ok {
+		return
+	}
+	cursor, title, meta := musicTextParts(mi.item, isSelected, width)
+	fmt.Fprintf(w, "%s%s\n  %s", cursor, title, meta)
+}
+
+func musicTextParts(it youtube.MusicItem, isSelected bool, width int) (cursor, title, meta string) {
+	cursor = "  "
+	if isSelected {
+		cursor = "> "
+	}
+	icon := typeIcon(it.Type)
+	titleStyle := styles.Title
+	if isSelected {
+		titleStyle = styles.SelectedTitle
+	}
+	title = titleStyle.Render(shared.Truncate(icon+" "+it.Title, width))
+	meta = styles.Dim.Render(shared.Truncate(it.Subtitle, width))
+	return
 }
 
 func typeIcon(t youtube.MusicItemType) string {

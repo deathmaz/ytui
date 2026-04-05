@@ -137,6 +137,10 @@ mode = "video"                     # "video" (default) or "music" for YouTube Mu
 [search]
 thumbnails = false                 # show thumbnails in search results (requires Kitty terminal)
 thumbnail_height = 5               # thumbnail height in terminal rows (default: 5)
+
+[music]
+thumbnails = false                 # show album thumbnails in lists (requires Kitty terminal)
+thumbnail_height = 5               # thumbnail height in terminal rows (default: 5)
 ```
 
 ## Testing

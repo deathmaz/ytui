@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
+	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -863,5 +864,134 @@ func TestBothModes_SearchFocusParity(t *testing.T) {
 	}
 	if !mm.onFixedView || mm.activeFixed != musicViewSearch {
 		t.Errorf("music: expected search view after /, got onFixed=%v activeFixed=%d", mm.onFixedView, mm.activeFixed)
+	}
+}
+
+// TestMusicMode_ThumbnailLoadedMsgStoresInListRenderer verifies that when a
+// ThumbnailLoadedMsg arrives, it is stored in the list renderer via
+// thumbList.HandleMsg. Regression test: the handler was missing the HandleMsg
+// call, so loaded thumbnails were never cached for list display.
+func TestMusicMode_ThumbnailLoadedMsgStoresInListRenderer(t *testing.T) {
+	cfg := testConfig()
+	cfg.Music.Thumbnails = true
+	cfg.Music.ThumbnailHeight = 5
+	m := NewMusic(
+		&mockMusicClient{authenticated: true},
+		&mockYTClient{authenticated: true},
+		cfg, nil, Options{},
+	)
+	// Switch to Home view so the search model doesn't also handle the message
+	// (search has its own ThumbList sharing the same renderer).
+	m.activeFixed = musicViewHome
+
+	if m.thumbList == nil {
+		t.Fatal("expected thumbList to be non-nil")
+	}
+	imgR := m.thumbList.Renderer()
+
+	// Mark a URL as inflight via FetchCmd so HandleLoaded will accept it.
+	imgR.FetchCmd("https://fake.test/unit.jpg", 20, 5)
+
+	// Send ThumbnailLoadedMsg through the model's Update.
+	msg := ytimage.ThumbnailLoadedMsg{
+		URL:         "https://fake.test/unit.jpg",
+		TransmitStr: "tx-data",
+		Placeholder: "pl-data",
+	}
+	m.Update(msg)
+
+	// Verify the thumbnail was cached in the list renderer.
+	_, pl := imgR.Get("https://fake.test/unit.jpg")
+	if pl != "pl-data" {
+		t.Errorf("expected placeholder cached via HandleMsg, got %q", pl)
+	}
+}
+
+// TestMusicMode_LibraryThumbnailFetchTargetsLoadedSection verifies that when a
+// library section loads, thumbnail fetches are triggered for that section's list,
+// not just the currently viewed sub-tab. Regression test: previously TriggerFetch
+// used librarySubIdx (active tab) instead of msg.Index (loaded tab).
+func TestMusicMode_LibraryThumbnailFetchTargetsLoadedSection(t *testing.T) {
+	mc := &mockMusicClient{
+		authenticated: true,
+		getLibSecFn: func(_ context.Context, browseID string) (*youtube.LibrarySectionResult, error) {
+			if browseID == "FEmusic_liked_albums" {
+				return &youtube.LibrarySectionResult{
+					Items: []youtube.MusicItem{
+						{Title: "Fake Album", Type: youtube.MusicAlbum, BrowseID: "b1",
+							Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/lib-album.jpg", Width: 226}}},
+					},
+				}, nil
+			}
+			return &youtube.LibrarySectionResult{}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Music.Thumbnails = true
+	cfg.Music.ThumbnailHeight = 5
+	tm := newTestMusicProgramFull(t, nil, mc, nil, cfg, Options{})
+
+	// Switch to Library tab (key "2": 1=Home, 2=Library, 3=Search)
+	sendKey(tm, "2")
+	// Wait for library sections to load
+	time.Sleep(500 * time.Millisecond)
+
+	m := quitAndGetMusicModel(t, tm)
+
+	// Albums is at index 2 in LibrarySections. Even though the user is viewing
+	// index 0 (Playlists), the album thumbnail fetch should have been triggered
+	// because TriggerFetch targets the loaded section, not the active one.
+	if m.thumbList == nil {
+		t.Fatal("expected thumbList to be non-nil with thumbnails enabled")
+	}
+	imgR := m.thumbList.Renderer()
+	if imgR == nil {
+		t.Fatal("expected renderer to be non-nil")
+	}
+	if !imgR.WasRequested("https://fake.test/lib-album.jpg") {
+		t.Error("expected FetchCmd to be called for album thumbnail in non-active library section")
+	}
+}
+
+// TestMusicMode_HomeThumbnailFetchTriggersAllShelves verifies that when the
+// home page loads, thumbnail fetches are triggered for all shelves, not just
+// the first one.
+func TestMusicMode_HomeThumbnailFetchTriggersAllShelves(t *testing.T) {
+	mc := &mockMusicClient{
+		authenticated: true,
+		getHomeFn: func(_ context.Context) ([]youtube.MusicShelf, error) {
+			return []youtube.MusicShelf{
+				{Title: "Quick picks", Items: []youtube.MusicItem{
+					{Title: "Song A", Type: youtube.MusicSong},
+				}},
+				{Title: "Trending Albums", Items: []youtube.MusicItem{
+					{Title: "Trending Album", Type: youtube.MusicAlbum, BrowseID: "ta1",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/trending.jpg", Width: 226}}},
+				}},
+			}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Music.Thumbnails = true
+	cfg.Music.ThumbnailHeight = 5
+	tm := newTestMusicProgramFull(t, nil, mc, nil, cfg, Options{})
+
+	// Switch to Home tab (key "1": 1=Home, 2=Library, 3=Search)
+	sendKey(tm, "1")
+	time.Sleep(500 * time.Millisecond)
+
+	m := quitAndGetMusicModel(t, tm)
+
+	if m.thumbList == nil {
+		t.Fatal("expected thumbList to be non-nil")
+	}
+	imgR := m.thumbList.Renderer()
+	if imgR == nil {
+		t.Fatal("expected renderer to be non-nil")
+	}
+	// The album in the second shelf should have its thumbnail fetch triggered,
+	// even though the user is viewing the first shelf.
+	if !imgR.WasRequested("https://fake.test/trending.jpg") {
+		t.Error("expected FetchCmd to be called for album thumbnail in non-active home shelf")
 	}
 }

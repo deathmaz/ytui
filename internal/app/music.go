@@ -112,18 +112,6 @@ func musicClearTransmitCmd() tea.Cmd {
 	})
 }
 
-func bestMusicThumbnail(thumbs []youtube.Thumbnail) string {
-	if len(thumbs) == 0 {
-		return ""
-	}
-	best := thumbs[0]
-	for _, t := range thumbs[1:] {
-		if t.Width > best.Width {
-			best = t
-		}
-	}
-	return best.URL
-}
 
 // musicItem wraps a MusicItem for the list component.
 type musicItem struct {
@@ -145,6 +133,7 @@ type MusicModel struct {
 	ytClient     youtube.Client
 	cfg          *config.Config
 	imgR         *ytimage.Renderer
+	thumbList    *shared.ThumbList
 	urlInput     urlinput.Model
 
 	// Fixed views
@@ -180,7 +169,17 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 	h := help.New()
 	h.ShortSeparator = "  "
 
-	s := search.New(newMusicSearchConfig(client))
+	var thumbList *shared.ThumbList
+	if cfg.Music.Thumbnails {
+		thumbList = shared.NewThumbList(ytimage.NewRenderer(), albumThumbURL)
+	}
+
+	thumbH := cfg.Music.ThumbnailHeight
+	if thumbH <= 0 {
+		thumbH = 5
+	}
+
+	s := search.New(newMusicSearchConfig(client, thumbList, thumbH))
 	if opts.SearchQuery != "" {
 		s.SetQuery(opts.SearchQuery)
 	}
@@ -193,6 +192,7 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 		ytClient:    ytClient,
 		cfg:         cfg,
 		imgR:        imgR,
+		thumbList:   thumbList,
 		search:      s,
 		urlInput:    urlinput.New(),
 		spinner:     styles.NewSpinner(),
@@ -439,9 +439,12 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setStatus("Home error: "+msg.Err.Error(), 5*time.Second)
 		}
 		m.homeLoaded = true
-		m.homeSubs = shelvesToSubTabs(msg.Shelves)
+		m.homeSubs = shelvesToSubTabs(msg.Shelves, m.musicListDelegate())
 		m.homeSubIdx = 0
-		return m, nil
+		for i := range m.homeSubs {
+			cmds = append(cmds, m.thumbList.TriggerFetch(&m.homeSubs[i].list, msg))
+		}
+		return m, tea.Batch(cmds...)
 
 	case musicLibrarySectionMsg:
 		if msg.Err != nil {
@@ -471,7 +474,10 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resizeViews()
 		}
 		m.status.Clear()
-		return m, nil
+		if msg.Index < len(m.librarySubs) {
+			cmds = append(cmds, m.thumbList.TriggerFetch(&m.librarySubs[msg.Index].list, msg))
+		}
+		return m, tea.Batch(cmds...)
 
 	case musicItemSelectedMsg:
 		return m, m.openMusicItem(msg.item)
@@ -496,10 +502,13 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				tab.loaded = true
 				m.resizeViews()
+				for j := range tab.artistSubs {
+					cmds = append(cmds, m.thumbList.TriggerFetch(&tab.artistSubs[j].list, msg))
+				}
 				break
 			}
 		}
-		return m, nil
+		return m, tea.Batch(cmds...)
 
 	case musicAlbumLoadedMsg:
 		m.pageLoading = false
@@ -518,7 +527,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				tab.loaded = true
 				m.resizeViews()
 				if m.imgR != nil && len(msg.Album.Thumbnails) > 0 {
-					thumbURL := bestMusicThumbnail(msg.Album.Thumbnails)
+					thumbURL := shared.BestThumbnailURL(msg.Album.Thumbnails)
 					if thumbURL != "" {
 						if tx, pl := m.imgR.Get(thumbURL); pl != "" {
 							tab.thumbTransmit = tx
@@ -602,18 +611,21 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case ytimage.ThumbnailLoadedMsg:
-		for i := range m.tabs.All() {
-			tab := m.tabs.At(i)
-			if tab.kind == musicTabAlbum && tab.loaded && tab.thumbPending {
-				if len(tab.albumPage.Thumbnails) > 0 && bestMusicThumbnail(tab.albumPage.Thumbnails) == msg.URL {
-					tab.thumbPending = false
-					if msg.Err == nil && msg.Placeholder != "" {
-						m.imgR.Store(msg.URL, msg.TransmitStr, msg.Placeholder)
-						tab.thumbTransmit = msg.TransmitStr
-						tab.thumbPlace = msg.Placeholder
+		// List thumbnails (search, home, library, artist shelves)
+		m.thumbList.HandleMsg(msg)
+		// Album detail page thumbnails
+		if m.imgR != nil && m.imgR.HandleLoaded(msg) {
+			for i := range m.tabs.All() {
+				tab := m.tabs.At(i)
+				if tab.kind == musicTabAlbum && tab.loaded && tab.thumbPending {
+					if len(tab.albumPage.Thumbnails) > 0 && shared.BestThumbnailURL(tab.albumPage.Thumbnails) == msg.URL {
+						tab.thumbPending = false
+						tx, pl := m.imgR.Get(msg.URL)
+						tab.thumbTransmit = tx
+						tab.thumbPlace = pl
 						cmds = append(cmds, musicClearTransmitCmd())
+						break
 					}
-					break
 				}
 			}
 		}
@@ -698,7 +710,7 @@ func (m *MusicModel) loadLibrary() tea.Cmd {
 	sections := youtube.LibrarySections
 	m.librarySubs = make([]subTab, len(sections))
 	for i, sec := range sections {
-		m.librarySubs[i] = subTab{title: sec.Title, list: shared.NewList(musicDelegate{})}
+		m.librarySubs[i] = subTab{title: sec.Title, list: shared.NewList(m.musicListDelegate())}
 	}
 	m.librarySubIdx = 0
 	m.libraryPending = len(sections)
@@ -726,13 +738,13 @@ func (m *MusicModel) loadLibrary() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func shelvesToSubTabs(shelves []youtube.MusicShelf) []subTab {
+func shelvesToSubTabs(shelves []youtube.MusicShelf, delegate list.ItemDelegate) []subTab {
 	var subs []subTab
 	for _, shelf := range shelves {
 		if len(shelf.Items) == 0 {
 			continue
 		}
-		l := shared.NewList(musicDelegate{})
+		l := shared.NewList(delegate)
 		var items []list.Item
 		for _, it := range shelf.Items {
 			items = append(items, musicItem{item: it})
@@ -895,7 +907,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 }
 
 func (m *MusicModel) buildArtistSubTabs(artist *youtube.MusicArtistPage) []subTab {
-	return shelvesToSubTabs(artist.Shelves)
+	return shelvesToSubTabs(artist.Shelves, m.musicListDelegate())
 }
 
 func (m *MusicModel) buildAlbumList(album *youtube.MusicAlbumPage) list.Model {
@@ -1004,11 +1016,13 @@ func (m *MusicModel) renderHome() string {
 	}
 
 	activeList := ""
+	var activeItems []list.Item
 	if m.homeSubIdx < len(m.homeSubs) {
 		activeList = m.homeSubs[m.homeSubIdx].list.View()
+		activeItems = m.homeSubs[m.homeSubIdx].list.Items()
 	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, subBar, activeList)
+	view := lipgloss.JoinVertical(lipgloss.Left, subBar, activeList)
+	return m.thumbList.WrapView(activeItems, view)
 }
 
 func (m *MusicModel) renderLibrary() string {
@@ -1036,8 +1050,10 @@ func (m *MusicModel) renderLibrary() string {
 	}
 
 	activeList := ""
+	var activeItems []list.Item
 	if m.librarySubIdx < len(m.librarySubs) {
 		activeList = m.librarySubs[m.librarySubIdx].list.View()
+		activeItems = m.librarySubs[m.librarySubIdx].list.Items()
 	}
 
 	var sections []string
@@ -1045,7 +1061,8 @@ func (m *MusicModel) renderLibrary() string {
 	if hint != "" {
 		sections = append(sections, hint)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	return m.thumbList.WrapView(activeItems, view)
 }
 
 func (m *MusicModel) renderSearch() string {
@@ -1099,8 +1116,10 @@ func (m *MusicModel) renderArtistPage(tab *musicTab) string {
 	}
 
 	activeList := ""
+	var activeItems []list.Item
 	if tab.activeSubTab < len(tab.artistSubs) {
 		activeList = tab.artistSubs[tab.activeSubTab].list.View()
+		activeItems = tab.artistSubs[tab.activeSubTab].list.Items()
 	}
 
 	var sections []string
@@ -1108,7 +1127,8 @@ func (m *MusicModel) renderArtistPage(tab *musicTab) string {
 	if hint != "" {
 		sections = append(sections, hint)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	return m.thumbList.WrapView(activeItems, view)
 }
 
 func (m *MusicModel) renderAlbumPage(tab *musicTab) string {
@@ -1321,10 +1341,25 @@ type musicItemSelectedMsg struct {
 	item youtube.MusicItem
 }
 
-func newMusicSearchConfig(client youtube.MusicAPI) search.Config {
+func (m *MusicModel) musicListDelegate() list.ItemDelegate {
+	thumbH := m.cfg.Music.ThumbnailHeight
+	if thumbH <= 0 {
+		thumbH = 5
+	}
+	return newMusicDelegate(m.thumbList.Renderer(), thumbH)
+}
+
+func newMusicSearchConfig(client youtube.MusicAPI, thumbList *shared.ThumbList, thumbH int) search.Config {
+	var delegate list.ItemDelegate
+	if imgR := thumbList.Renderer(); imgR != nil {
+		delegate = newMusicDelegate(imgR, thumbH)
+	} else {
+		delegate = musicDelegate{}
+	}
 	return search.Config{
 		Placeholder: "Search YouTube Music...",
-		Delegate:    musicDelegate{},
+		Delegate:    delegate,
+		ThumbList:   thumbList,
 		SearchFn: func(ctx context.Context, query, pageToken string) search.SearchResult {
 			result, err := client.Search(ctx, query, pageToken)
 			if err != nil {

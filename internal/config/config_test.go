@@ -78,6 +78,12 @@ func TestDefault(t *testing.T) {
 	if cfg.Search.ThumbnailHeight != 5 {
 		t.Errorf("Search.ThumbnailHeight = %d, want 5", cfg.Search.ThumbnailHeight)
 	}
+	if cfg.Music.Thumbnails {
+		t.Error("Music.Thumbnails should default to false")
+	}
+	if cfg.Music.ThumbnailHeight != 5 {
+		t.Errorf("Music.ThumbnailHeight = %d, want 5", cfg.Music.ThumbnailHeight)
+	}
 }
 
 func TestLoad_NoFile(t *testing.T) {

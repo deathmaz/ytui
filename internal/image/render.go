@@ -16,10 +16,11 @@ type ThumbnailLoadedMsg struct {
 
 // Renderer manages thumbnail fetching, encoding, and caching.
 type Renderer struct {
-	mu      sync.RWMutex
-	cache   map[string]cachedThumb
-	inflight map[string]bool // URLs currently being fetched
-	sem     chan struct{}     // concurrency limiter
+	mu        sync.RWMutex
+	cache     map[string]cachedThumb
+	inflight  map[string]bool // URLs currently being fetched
+	requested map[string]bool // all URLs ever passed to FetchCmd (for testing)
+	sem       chan struct{}   // concurrency limiter
 }
 
 type cachedThumb struct {
@@ -30,9 +31,10 @@ type cachedThumb struct {
 // NewRenderer creates a new thumbnail renderer.
 func NewRenderer() *Renderer {
 	return &Renderer{
-		cache:    make(map[string]cachedThumb),
-		inflight: make(map[string]bool),
-		sem:      make(chan struct{}, 3), // max 3 concurrent fetches
+		cache:     make(map[string]cachedThumb),
+		inflight:  make(map[string]bool),
+		requested: make(map[string]bool),
+		sem:       make(chan struct{}, 3), // max 3 concurrent fetches
 	}
 }
 
@@ -60,6 +62,29 @@ func (r *Renderer) ClearInflight(url string) {
 	delete(r.inflight, url)
 }
 
+// HandleLoaded processes a ThumbnailLoadedMsg if it was initiated by this
+// renderer. Returns true if the message was handled (URL was in the inflight
+// set), false otherwise. This enables multiple renderers to coexist safely.
+func (r *Renderer) HandleLoaded(msg ThumbnailLoadedMsg) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.inflight[msg.URL] {
+		return false
+	}
+	delete(r.inflight, msg.URL)
+	if msg.Err == nil && msg.Placeholder != "" {
+		r.cache[msg.URL] = cachedThumb{transmitStr: msg.TransmitStr, placeholder: msg.Placeholder}
+	}
+	return true
+}
+
+// WasRequested reports whether FetchCmd was ever called for a URL.
+func (r *Renderer) WasRequested(url string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.requested[url]
+}
+
 // FetchCmd returns a tea.Cmd that fetches and encodes a thumbnail.
 func (r *Renderer) FetchCmd(url string, cols, rows int) tea.Cmd {
 	if url == "" {
@@ -73,6 +98,7 @@ func (r *Renderer) FetchCmd(url string, cols, rows int) tea.Cmd {
 		r.mu.Unlock()
 		return nil
 	}
+	r.requested[url] = true
 	r.inflight[url] = true
 	r.mu.Unlock()
 

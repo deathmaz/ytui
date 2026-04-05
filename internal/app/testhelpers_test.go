@@ -87,13 +87,20 @@ func newTestMusicProgram(t *testing.T, ytClient *mockYTClient, musicClient *mock
 
 func newTestMusicProgramWithOpts(t *testing.T, ytClient *mockYTClient, musicClient *mockMusicClient, imgR *ytimage.Renderer, opts Options) *teatest.TestModel {
 	t.Helper()
+	return newTestMusicProgramFull(t, ytClient, musicClient, imgR, nil, opts)
+}
+
+func newTestMusicProgramFull(t *testing.T, ytClient *mockYTClient, musicClient *mockMusicClient, imgR *ytimage.Renderer, cfg *config.Config, opts Options) *teatest.TestModel {
+	t.Helper()
 	if ytClient == nil {
 		ytClient = &mockYTClient{authenticated: true}
 	}
 	if musicClient == nil {
 		musicClient = &mockMusicClient{authenticated: true}
 	}
-	cfg := testConfig()
+	if cfg == nil {
+		cfg = testConfig()
+	}
 	m := NewMusic(musicClient, ytClient, cfg, imgR, opts)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
 	time.Sleep(50 * time.Millisecond)
