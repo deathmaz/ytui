@@ -875,8 +875,8 @@ func TestBothModes_SearchFocusParity(t *testing.T) {
 // images to appear.
 func TestVideoMode_ThumbnailLoadedWhileDetailTabActive(t *testing.T) {
 	cfg := testConfig()
-	cfg.Search.Thumbnails = true
-	cfg.Search.ThumbnailHeight = 5
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
 	m := New(&mockYTClient{authenticated: true}, cfg, Options{})
 
 	// Switch to a video tab so the detail view is active
@@ -908,8 +908,8 @@ func TestVideoMode_ThumbnailLoadedWhileDetailTabActive(t *testing.T) {
 // is cached by the app-level handler (which handles it globally for all views).
 func TestVideoMode_FeedThumbnailLoadedMsgStores(t *testing.T) {
 	cfg := testConfig()
-	cfg.Search.Thumbnails = true
-	cfg.Search.ThumbnailHeight = 5
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
 	m := New(&mockYTClient{authenticated: true}, cfg, Options{})
 
 	// Switch to feed so the test covers the feed-active scenario.
@@ -941,8 +941,8 @@ func TestVideoMode_FeedThumbnailLoadedMsgStores(t *testing.T) {
 // call, so loaded thumbnails were never cached for list display.
 func TestMusicMode_ThumbnailLoadedMsgStoresInListRenderer(t *testing.T) {
 	cfg := testConfig()
-	cfg.Music.Thumbnails = true
-	cfg.Music.ThumbnailHeight = 5
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
 	m := NewMusic(
 		&mockMusicClient{authenticated: true},
 		&mockYTClient{authenticated: true},
@@ -995,8 +995,8 @@ func TestMusicMode_LibraryThumbnailFetchTargetsLoadedSection(t *testing.T) {
 		},
 	}
 	cfg := testConfig()
-	cfg.Music.Thumbnails = true
-	cfg.Music.ThumbnailHeight = 5
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
 	tm := newTestMusicProgramFull(t, nil, mc, nil, cfg, Options{})
 
 	// Switch to Library tab (key "2": 1=Home, 2=Library, 3=Search)
@@ -1040,8 +1040,8 @@ func TestMusicMode_HomeThumbnailFetchTriggersAllShelves(t *testing.T) {
 		},
 	}
 	cfg := testConfig()
-	cfg.Music.Thumbnails = true
-	cfg.Music.ThumbnailHeight = 5
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
 	tm := newTestMusicProgramFull(t, nil, mc, nil, cfg, Options{})
 
 	// Switch to Home tab (key "1": 1=Home, 2=Library, 3=Search)

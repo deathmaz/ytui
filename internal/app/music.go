@@ -170,11 +170,11 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 	h.ShortSeparator = "  "
 
 	var thumbList *shared.ThumbList
-	if cfg.Music.Thumbnails {
+	if cfg.Thumbnails.Enabled {
 		thumbList = shared.NewThumbList(ytimage.NewRenderer(), musicThumbURL)
 	}
 
-	thumbH := cfg.Music.ThumbnailHeight
+	thumbH := cfg.Thumbnails.Height
 	if thumbH <= 0 {
 		thumbH = 5
 	}
@@ -1342,7 +1342,7 @@ type musicItemSelectedMsg struct {
 }
 
 func (m *MusicModel) musicListDelegate() list.ItemDelegate {
-	thumbH := m.cfg.Music.ThumbnailHeight
+	thumbH := m.cfg.Thumbnails.Height
 	if thumbH <= 0 {
 		thumbH = 5
 	}

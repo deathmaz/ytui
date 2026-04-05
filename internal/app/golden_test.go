@@ -96,8 +96,8 @@ func TestGolden_Video_Search_WithThumbnails(t *testing.T) {
 		},
 	}
 	cfg := testConfig()
-	cfg.Search.Thumbnails = true
-	cfg.Search.ThumbnailHeight = 5
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
 	tm := newTestVideoProgramFull(t, client, cfg, Options{SearchQuery: "golang"})
 	waitThenCapture(t, tm, "Learn Go Programming")
 }
@@ -160,8 +160,8 @@ func TestGolden_Video_Feed_WithThumbnails(t *testing.T) {
 		},
 	}
 	cfg := testConfig()
-	cfg.Search.Thumbnails = true
-	cfg.Search.ThumbnailHeight = 5
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
 	tm := newTestVideoProgramFull(t, client, cfg, Options{})
 	sendKey(tm, "1")
 	waitThenCapture(t, tm, "New Release")
@@ -428,8 +428,8 @@ func TestGolden_Music_Search_WithThumbnails(t *testing.T) {
 		},
 	}
 	cfg := testConfig()
-	cfg.Music.Thumbnails = true
-	cfg.Music.ThumbnailHeight = 5
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
 	tm := newTestMusicProgramFull(t, nil, mc, nil, cfg, Options{SearchQuery: "album test"})
 	waitThenCapture(t, tm, "Great Album")
 }

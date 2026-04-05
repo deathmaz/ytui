@@ -72,17 +72,11 @@ func TestDefault(t *testing.T) {
 	if cfg.Auth.AuthOnStartup {
 		t.Error("Auth.AuthOnStartup should default to false")
 	}
-	if cfg.Search.Thumbnails {
-		t.Error("Search.Thumbnails should default to false")
+	if cfg.Thumbnails.Enabled {
+		t.Error("Thumbnails.Enabled should default to false")
 	}
-	if cfg.Search.ThumbnailHeight != 5 {
-		t.Errorf("Search.ThumbnailHeight = %d, want 5", cfg.Search.ThumbnailHeight)
-	}
-	if cfg.Music.Thumbnails {
-		t.Error("Music.Thumbnails should default to false")
-	}
-	if cfg.Music.ThumbnailHeight != 5 {
-		t.Errorf("Music.ThumbnailHeight = %d, want 5", cfg.Music.ThumbnailHeight)
+	if cfg.Thumbnails.Height != 5 {
+		t.Errorf("Thumbnails.Height = %d, want 5", cfg.Thumbnails.Height)
 	}
 }
 
@@ -209,7 +203,7 @@ func TestEffective_FallbackToVideo(t *testing.T) {
 	}
 }
 
-func TestLoad_SearchThumbnails(t *testing.T) {
+func TestLoad_Thumbnails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
@@ -217,9 +211,9 @@ func TestLoad_SearchThumbnails(t *testing.T) {
 	os.MkdirAll(cfgDir, 0755)
 
 	content := `
-[search]
-thumbnails = true
-thumbnail_height = 7
+[thumbnails]
+enabled = true
+height = 7
 `
 	os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0644)
 
@@ -228,13 +222,12 @@ thumbnail_height = 7
 		t.Fatal(err)
 	}
 
-	if !cfg.Search.Thumbnails {
-		t.Error("Search.Thumbnails should be true")
+	if !cfg.Thumbnails.Enabled {
+		t.Error("Thumbnails.Enabled should be true")
 	}
-	if cfg.Search.ThumbnailHeight != 7 {
-		t.Errorf("Search.ThumbnailHeight = %d, want 7", cfg.Search.ThumbnailHeight)
+	if cfg.Thumbnails.Height != 7 {
+		t.Errorf("Thumbnails.Height = %d, want 7", cfg.Thumbnails.Height)
 	}
-	// Other defaults should be preserved
 	if cfg.Player.Video.Command != "mpv" {
 		t.Errorf("Player.Video.Command = %q, want default %q", cfg.Player.Video.Command, "mpv")
 	}

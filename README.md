@@ -134,13 +134,9 @@ auth_on_startup = false            # auto-authenticate on launch (default: false
 [general]
 mode = "video"                     # "video" (default) or "music" for YouTube Music mode
 
-[search]
-thumbnails = false                 # show thumbnails in search results (requires Kitty terminal)
-thumbnail_height = 5               # thumbnail height in terminal rows (default: 5)
-
-[music]
-thumbnails = false                 # show album thumbnails in lists (requires Kitty terminal)
-thumbnail_height = 5               # thumbnail height in terminal rows (default: 5)
+[thumbnails]
+enabled = false                    # show thumbnails in lists (requires Kitty terminal)
+height = 5                         # thumbnail height in terminal rows (default: 5)
 ```
 
 ## Testing

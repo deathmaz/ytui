@@ -121,10 +121,10 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 // lists (search and feed). Returns nil ThumbList and plain delegate when
 // thumbnails are disabled.
 func newVideoListSetup(cfg *config.Config) (*shared.ThumbList, list.ItemDelegate) {
-	if !cfg.Search.Thumbnails {
+	if !cfg.Thumbnails.Enabled {
 		return nil, shared.VideoDelegate{}
 	}
-	thumbH := cfg.Search.ThumbnailHeight
+	thumbH := cfg.Thumbnails.Height
 	if thumbH <= 0 {
 		thumbH = 5
 	}
