@@ -65,6 +65,11 @@ func (m *Model) SelectedVideo() *youtube.Video {
 	return nil
 }
 
+// Refresh reloads the playlist videos.
+func (m *Model) Refresh() tea.Cmd {
+	return m.Load(m.playlist)
+}
+
 func (m *Model) Load(pl youtube.Playlist) tea.Cmd {
 	m.playlist = pl
 	m.loading = true

@@ -333,7 +333,7 @@ func (m *Model) renderInfo() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(styles.Dim.Render("[p] play  [d] download  [o] open in browser  [y] copy URL  [tab] comments  [esc] back"))
+	b.WriteString(styles.Dim.Render("[p] play  [d] download  [o] open in browser  [y] copy URL  [c] channel  [tab] comments  [esc] back"))
 
 	return b.String()
 }

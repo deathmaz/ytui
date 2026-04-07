@@ -1141,3 +1141,62 @@ func TestVideoMode_PlaylistFromURL(t *testing.T) {
 		t.Errorf("expected ViewDynamicTab, got %d", m.activeView)
 	}
 }
+
+func TestVideoMode_RefreshChannelTab(t *testing.T) {
+	var videoCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{{ID: "UCfake_ref", Name: "Fake Refresh Channel"}},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			videoCalls.Add(1)
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "v1", Title: "Fake Video", ChannelName: "Fake Refresh Channel"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Refresh Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Fake Video")
+
+	before := videoCalls.Load()
+	sendKey(tm, "r")
+	time.Sleep(500 * time.Millisecond)
+	after := videoCalls.Load()
+
+	if after <= before {
+		t.Errorf("expected channel videos to be re-fetched on refresh, calls before=%d after=%d", before, after)
+	}
+	quitAndGetVideoModel(t, tm)
+}
+
+func TestVideoMode_RefreshPlaylistTab(t *testing.T) {
+	var plCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getPlaylistVideosFn: func(_ context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error) {
+			plCalls.Add(1)
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "pv1", Title: "PL Video", ChannelName: "Fake"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	tm.Send(urlinput.SubmitMsg{Parsed: youtube.ParsedURL{Kind: youtube.URLPlaylist, ID: "PLfake_ref"}})
+	time.Sleep(500 * time.Millisecond)
+
+	before := plCalls.Load()
+	sendKey(tm, "r")
+	time.Sleep(500 * time.Millisecond)
+	after := plCalls.Load()
+
+	if after <= before {
+		t.Errorf("expected playlist videos to be re-fetched on refresh, calls before=%d after=%d", before, after)
+	}
+	quitAndGetVideoModel(t, tm)
+}

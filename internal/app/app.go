@@ -730,6 +730,15 @@ func (m *Model) refresh() tea.Cmd {
 		if q := m.search.Query(); q != "" {
 			return m.search.Refresh()
 		}
+	case ViewDynamicTab:
+		if tab := m.tabs.Active(); tab != nil {
+			switch tab.kind {
+			case tabChannel:
+				return tab.channel.Refresh()
+			case tabPlaylist:
+				return tab.playlist.Refresh()
+			}
+		}
 	}
 	return nil
 }

@@ -7,8 +7,11 @@ A terminal-based YouTube client built with Go and [Bubble Tea](https://github.co
 ### Video Mode
 - **Search** YouTube videos with infinite scroll
 - **Subscription feed** and **channel list** (requires authentication)
+- **Channel details** with Videos, Playlists, and Posts sub-tabs
+- **Playlist view** with paginated video list
+- **Community posts** with detail view and comments
 - **Video details** with views, likes, description, and thumbnail
-- **Comments** with threaded replies, expand/collapse
+- **Comments** with threaded replies, expand/collapse (videos and posts)
 - **Play** videos with mpv/vlc (background, TUI stays active)
 - **Download** videos with yt-dlp
 - **Thumbnails** rendered in terminal via Kitty graphics protocol
@@ -65,13 +68,15 @@ ytui -music -open "https://youtube.com/playlist?list=PLxxx"  # open playlist in 
 | Key | Action |
 |-----|--------|
 | `1` / `2` / `3` | Switch to Feed / Subs / Search |
+| `4`-`9` | Switch to open tabs (video/channel/playlist/post) |
 | `j` / `k` | Navigate down / up |
 | `Ctrl+d` / `Ctrl+u` | Half page down / up |
 | `g` / `G` | Top / bottom |
 | `/` | Focus search input |
 | `Esc` | Go back / blur input |
-| `Enter` | Select / search |
+| `Enter` | Select / search / open channel or playlist |
 | `i` | Video details |
+| `c` | Open channel for selected video |
 | `p` | Play video (default/config quality) |
 | `P` | Play video (pick quality from list) |
 | `d` | Download video |
@@ -80,7 +85,7 @@ ytui -music -open "https://youtube.com/playlist?list=PLxxx"  # open playlist in 
 | `L` | Load more (comments / search results) |
 | `a` | Authenticate (extract browser cookies) |
 | `o` | Open video in browser |
-| `O` | Open URL dialog (paste YouTube URL) |
+| `O` | Open URL dialog (paste YouTube video/channel/playlist URL) |
 | `y` | Copy video URL to clipboard |
 | `r` | Refresh current view |
 | `?` | Toggle help |

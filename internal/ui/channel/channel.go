@@ -163,19 +163,39 @@ func (m *Model) SelectedVideo() *youtube.Video {
 	return nil
 }
 
+// Refresh reloads the currently active sub-tab.
+func (m *Model) Refresh() tea.Cmd {
+	switch m.activeTab {
+	case tabVideos:
+		m.videoLoaded = false
+		return m.loadVideos()
+	case tabPlaylists:
+		m.playlistLoaded = false
+		return m.loadPlaylists()
+	case tabPosts:
+		m.postLoaded = false
+		return m.loadPosts()
+	}
+	return nil
+}
+
 func (m *Model) Load(ch youtube.Channel) tea.Cmd {
 	m.channel = ch
 	m.activeTab = tabVideos
-	m.videoLoading = true
 	m.videoLoaded = false
-	m.videoToken = ""
 	m.playlistLoaded = false
-	m.playlistToken = ""
 	m.postLoaded = false
-	m.postToken = ""
+	return m.loadVideos()
+}
 
+func (m *Model) loadVideos() tea.Cmd {
+	if m.videoLoading {
+		return nil
+	}
+	m.videoLoading = true
+	m.videoToken = ""
 	client := m.client
-	channelID := ch.ID
+	channelID := m.channel.ID
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
 		page, err := client.GetChannelVideos(context.Background(), channelID, "")
 		if err != nil {
