@@ -18,6 +18,7 @@ import (
 	"github.com/deathmaz/ytui/internal/download"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
+	"github.com/deathmaz/ytui/internal/ui/channel"
 	"github.com/deathmaz/ytui/internal/ui/detail"
 	"github.com/deathmaz/ytui/internal/ui/feed"
 	"github.com/deathmaz/ytui/internal/ui/picker"
@@ -45,14 +46,23 @@ type formatsLoadedMsg struct {
 type downloadResultMsg struct{ result download.Result }
 type clearStatusMsg struct{ seq int }
 
-const maxVideoTabs = 6
+const maxDynamicTabs = 6
 
-// videoTab holds the state for a single video tab.
-type videoTab struct {
-	videoID string
+type tabKind int
+
+const (
+	tabVideo   tabKind = iota
+	tabChannel
+)
+
+// dynamicTab holds the state for a single dynamic tab (video detail or channel).
+type dynamicTab struct {
+	kind    tabKind
+	id      string // videoID or channelID — used for deduplication
 	title   string
-	detail  detail.Model
-	formats []player.Format // cached quality list from yt-dlp
+	detail  detail.Model    // video tab
+	formats []player.Format // cached quality list (video tab only)
+	channel channel.Model   // channel tab
 }
 
 // Model is the root Bubble Tea model.
@@ -68,10 +78,11 @@ type Model struct {
 	ytClient      youtube.Client
 	imgR          *ytimage.Renderer
 	listThumbList *shared.ThumbList
+	listDelegate  list.ItemDelegate
 	picker        picker.Model
 	urlInput      urlinput.Model
 	cfg           *config.Config
-	videoTabs TabSet[videoTab]
+	tabs TabSet[dynamicTab]
 
 	pendingVideoURL string
 	pendingOpen     *youtube.ParsedURL
@@ -107,11 +118,12 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 		subs:        subs.New(client),
 		imgR:          imgR,
 		listThumbList: thumbList,
+		listDelegate:  listDelegate,
 		ytClient:      client,
 		picker:      picker.New(),
 		urlInput:    urlinput.New(),
 		cfg:         cfg,
-		videoTabs:      NewTabSet[videoTab](maxVideoTabs, func(t *videoTab) string { return t.videoID }),
+		tabs:           NewTabSet[dynamicTab](maxDynamicTabs, func(t *dynamicTab) string { return t.id }),
 		pendingOpen:    opts.OpenURL,
 		startupWarning: opts.Warning,
 	}
@@ -203,9 +215,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Esc handling
 		if key.Matches(msg, m.keys.Back) {
-			if m.activeView == ViewVideoTab {
-				m.closeActiveVideoTab()
-				if m.videoTabs.Len() == 0 {
+			if m.activeView == ViewDynamicTab {
+				m.closeActiveTab()
+				if m.tabs.Len() == 0 {
 					m.activeView = ViewSearch
 				}
 				return m, nil
@@ -234,14 +246,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.copyURL()
 			case key.Matches(msg, m.keys.Refresh):
 				return m, m.refresh()
+			case key.Matches(msg, m.keys.Channel):
+				return m, m.openChannelForSelected()
 			}
 
-			// Video tab number keys (4-9)
+			// Dynamic tab number keys (4-9)
 		if k := msg.String(); len(k) == 1 && k[0] >= '4' && k[0] <= '9' {
 			idx := int(k[0] - '4')
-			if idx < m.videoTabs.Len() {
-				m.activeView = ViewVideoTab
-				m.videoTabs.SetActive(idx)
+			if idx < m.tabs.Len() {
+				m.activeView = ViewDynamicTab
+				m.tabs.SetActive(idx)
 				return m, nil
 			}
 		}
@@ -255,8 +269,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case urlinput.CancelMsg:
 
 	case subs.ChannelSelectedMsg:
-		// TODO: show channel videos
-		return m, m.setStatus("Channel: "+msg.Channel.Name, 3*time.Second)
+		return m, m.openChannelTab(msg.Channel)
 
 	case formatsLoadedMsg:
 		var formats []player.Format
@@ -266,7 +279,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			formats = msg.formats
 		}
 		// Cache on active video tab
-		if tab := m.activeTab(); tab != nil {
+		if tab := m.activeVideoTab(); tab != nil {
 			tab.formats = formats
 		}
 		m.picker.Show(formats, m.width, m.height)
@@ -307,6 +320,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ytClient = newClient
 				tl, dl := newVideoListSetup(m.cfg)
 				m.listThumbList = tl
+				m.listDelegate = dl
 				m.search = search.New(newVideoSearchConfig(newClient, m.listThumbList, dl))
 				m.feed = feed.New(newClient, dl, m.listThumbList)
 				m.subs = subs.New(newClient)
@@ -350,13 +364,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.subs, cmd = m.subs.Update(msg)
 		cmds = append(cmds, cmd)
-	case ViewVideoTab:
-		if tab := m.activeTab(); tab != nil {
-			if vlm, ok := msg.(detail.VideoLoadedMsg); ok && vlm.Err == nil && vlm.Video != nil && tab.title == "" {
-				tab.title = vlm.Video.Title
-			}
+	case ViewDynamicTab:
+		if tab := m.tabs.Active(); tab != nil {
 			var cmd tea.Cmd
-			tab.detail, cmd = tab.detail.Update(msg)
+			switch tab.kind {
+			case tabVideo:
+				if vlm, ok := msg.(detail.VideoLoadedMsg); ok && vlm.Err == nil && vlm.Video != nil && tab.title == "" {
+					tab.title = vlm.Video.Title
+				}
+				tab.detail, cmd = tab.detail.Update(msg)
+			case tabChannel:
+				tab.channel, cmd = tab.channel.Update(msg)
+			}
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -382,15 +401,18 @@ func (m *Model) View() string {
 	)
 }
 
-// activeTab returns the currently active video tab, or nil.
-func (m *Model) activeTab() *videoTab {
-	if m.activeView != ViewVideoTab {
+// activeVideoTab returns the currently active video tab, or nil.
+func (m *Model) activeVideoTab() *dynamicTab {
+	if m.activeView != ViewDynamicTab {
 		return nil
 	}
-	return m.videoTabs.Active()
+	tab := m.tabs.Active()
+	if tab != nil && tab.kind == tabVideo {
+		return tab
+	}
+	return nil
 }
 
-// openVideoTab opens a new video tab or switches to existing one for the same video.
 func (m *Model) openParsedURL(p *youtube.ParsedURL) tea.Cmd {
 	if p == nil {
 		return nil
@@ -398,40 +420,81 @@ func (m *Model) openParsedURL(p *youtube.ParsedURL) tea.Cmd {
 	switch p.Kind {
 	case youtube.URLVideo:
 		return m.openVideoTab(&youtube.Video{ID: p.ID})
+	case youtube.URLChannel:
+		return m.openChannelTab(youtube.Channel{ID: p.ID})
 	}
 	return nil
 }
 
 func (m *Model) openVideoTab(v *youtube.Video) tea.Cmd {
-	// Check if already open
-	if idx, found := m.videoTabs.Find(v.ID); found {
-		m.activeView = ViewVideoTab
-		m.videoTabs.SetActive(idx)
+	if idx, found := m.tabs.Find(v.ID); found {
+		m.activeView = ViewDynamicTab
+		m.tabs.SetActive(idx)
 		return nil
 	}
 
 	d := detail.New(m.ytClient, m.imgR)
 	d.SetSize(m.width, m.contentHeight())
 
-	idx, err := m.videoTabs.Open(videoTab{
-		videoID: v.ID,
-		title:   v.Title,
-		detail:  d,
+	idx, err := m.tabs.Open(dynamicTab{
+		kind:  tabVideo,
+		id:    v.ID,
+		title: v.Title,
+		detail: d,
 	})
 	if err != nil {
-		return m.setStatus("Max video tabs reached (close one with Esc)", 3*time.Second)
+		return m.setStatus("Max tabs reached (close one with Esc)", 3*time.Second)
 	}
-	m.videoTabs.SetActive(idx)
-	m.activeView = ViewVideoTab
-	return m.videoTabs.Active().detail.LoadVideo(v.ID)
+	m.tabs.SetActive(idx)
+	m.activeView = ViewDynamicTab
+	return m.tabs.Active().detail.LoadVideo(v.ID)
 }
 
-// closeActiveVideoTab closes the current video tab.
-func (m *Model) closeActiveVideoTab() {
-	if m.activeView != ViewVideoTab || m.videoTabs.Len() == 0 {
+func (m *Model) openChannelTab(ch youtube.Channel) tea.Cmd {
+	if idx, found := m.tabs.Find(ch.ID); found {
+		m.activeView = ViewDynamicTab
+		m.tabs.SetActive(idx)
+		return nil
+	}
+
+	cv := channel.New(m.ytClient, m.listDelegate, m.listThumbList)
+	cv.SetSize(m.width, m.contentHeight())
+
+	title := ch.Name
+	if title == "" {
+		title = ch.Handle
+	}
+	idx, err := m.tabs.Open(dynamicTab{
+		kind:    tabChannel,
+		id:      ch.ID,
+		title:   title,
+		channel: cv,
+	})
+	if err != nil {
+		return m.setStatus("Max tabs reached (close one with Esc)", 3*time.Second)
+	}
+	m.tabs.SetActive(idx)
+	m.activeView = ViewDynamicTab
+	return m.tabs.Active().channel.Load(ch)
+}
+
+func (m *Model) openChannelForSelected() tea.Cmd {
+	v := m.selectedVideo()
+	if v == nil || v.ChannelID == "" {
+		return nil
+	}
+	return m.openChannelTab(youtube.Channel{
+		ID:   v.ChannelID,
+		Name: v.ChannelName,
+	})
+}
+
+// closeActiveTab closes the current dynamic tab.
+func (m *Model) closeActiveTab() {
+	if m.activeView != ViewDynamicTab || m.tabs.Len() == 0 {
 		return
 	}
-	m.videoTabs.Close(m.videoTabs.ActiveIdx())
+	m.tabs.Close(m.tabs.ActiveIdx())
 }
 
 func (m *Model) switchTo(v View) {
@@ -448,9 +511,14 @@ func (m *Model) selectedVideo() *youtube.Video {
 		if v, ok := m.feed.SelectedVideo(); ok {
 			return &v
 		}
-	case ViewVideoTab:
-		if tab := m.activeTab(); tab != nil {
-			return tab.detail.Video()
+	case ViewDynamicTab:
+		if tab := m.tabs.Active(); tab != nil {
+			switch tab.kind {
+			case tabVideo:
+				return tab.detail.Video()
+			case tabChannel:
+				return tab.channel.SelectedVideo()
+			}
 		}
 	}
 	return nil
@@ -478,7 +546,7 @@ func (m *Model) fetchFormatsAndPlay() tea.Cmd {
 		return nil
 	}
 	// Use cached formats from the active video tab if available
-	if tab := m.activeTab(); tab != nil && len(tab.formats) > 0 {
+	if tab := m.activeVideoTab(); tab != nil && len(tab.formats) > 0 {
 		m.picker.Show(tab.formats, m.width, m.height)
 		m.pendingVideoURL = v.URL
 		return nil
@@ -613,8 +681,14 @@ func (m *Model) resizeViews() {
 	m.search.SetSize(m.width, ch)
 	m.feed.SetSize(m.width, ch)
 	m.subs.SetSize(m.width, ch)
-	for i := range m.videoTabs.All() {
-		m.videoTabs.At(i).detail.SetSize(m.width, ch)
+	for i := range m.tabs.All() {
+		tab := m.tabs.At(i)
+		switch tab.kind {
+		case tabVideo:
+			tab.detail.SetSize(m.width, ch)
+		case tabChannel:
+			tab.channel.SetSize(m.width, ch)
+		}
 	}
 }
 
@@ -638,15 +712,19 @@ func (m *Model) renderTabs() string {
 		rendered = append(rendered, style.Render(t.label))
 	}
 
-	// Video tabs
-	for i, tab := range m.videoTabs.All() {
+	// Dynamic tabs
+	for i, tab := range m.tabs.All() {
 		title := tab.title
 		if title == "" {
 			title = "..."
 		}
-		label := fmt.Sprintf("[%d] %s", i+4, shared.Truncate(title, 20))
+		prefix := ""
+		if tab.kind == tabChannel {
+			prefix = "@ "
+		}
+		label := fmt.Sprintf("[%d] %s%s", i+4, prefix, shared.Truncate(title, 20-len(prefix)))
 		style := tabStyle
-		if m.activeView == ViewVideoTab && m.videoTabs.ActiveIdx() == i {
+		if m.activeView == ViewDynamicTab && m.tabs.ActiveIdx() == i {
 			style = activeTabStyle
 		}
 		rendered = append(rendered, style.Render(label))
@@ -665,9 +743,14 @@ func (m *Model) renderContent() string {
 		return m.feed.View()
 	case ViewSubs:
 		return m.subs.View()
-	case ViewVideoTab:
-		if tab := m.activeTab(); tab != nil {
-			return tab.detail.View()
+	case ViewDynamicTab:
+		if tab := m.tabs.Active(); tab != nil {
+			switch tab.kind {
+			case tabVideo:
+				return tab.detail.View()
+			case tabChannel:
+				return tab.channel.View()
+			}
 		}
 	}
 	return ""

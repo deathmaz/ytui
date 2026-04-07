@@ -1,7 +1,8 @@
-[23A  [1] Feed    [2] Subs    [3] Search                                            
+[23A  [1] Feed    [2] Subs    [3] Search    [4] @ Test Channel                      
 ────────────────────────────────────────────────────────────────────────────────
- > Search YouTube...                                                            
-No items.                                                                       
+ Videos  Playlists  Posts                                                       
+                     > Channel Vid From C Key  10:00                            
+                       Test Channel  2K views  2 days ago                       
                                                                                 
                                                                                 
                                                                                 
@@ -16,9 +17,8 @@ No items.
                                                                                 
                                                                                 
                                                                                 
-k   up                1   feed             p play                …              
-j   down              2   subscriptions    P play (pick quality)                
-C-b page up           /   search           d download                           
-C-f page down         esc back             i details                            
-C-u half page up                           c channel                            
-C-d half page down                                                              
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+1 feed  2 subscriptions  / search  ? help  q quit                               

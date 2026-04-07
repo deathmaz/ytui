@@ -12,6 +12,7 @@ import (
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/ui/shared"
+	"github.com/deathmaz/ytui/internal/ui/urlinput"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
 
@@ -201,8 +202,8 @@ func TestVideoMode_TabLifecycle(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	result := quitAndGetVideoModel(t, tm)
-	if result.videoTabs.Len() > 1 {
-		t.Errorf("expected at most 1 tab after closing, got %d", result.videoTabs.Len())
+	if result.tabs.Len() > 1 {
+		t.Errorf("expected at most 1 tab after closing, got %d", result.tabs.Len())
 	}
 }
 
@@ -634,13 +635,13 @@ func TestVideoMode_MaxTabsReached(t *testing.T) {
 		},
 	}
 	tm := newTestVideoProgram(t, client)
-	for i := 0; i < maxVideoTabs; i++ {
+	for i := 0; i < maxDynamicTabs; i++ {
 		tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: fmt.Sprintf("v%d", i), Title: fmt.Sprintf("Tab %d", i)}})
 		time.Sleep(100 * time.Millisecond)
 	}
 	// Try 7th
 	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "v6", Title: "Tab 6"}})
-	waitForContent(t, tm, "Max video tabs")
+	waitForContent(t, tm, "Max tabs")
 	quitAndGetVideoModel(t, tm)
 }
 
@@ -663,8 +664,8 @@ func TestVideoMode_CloseLastTabFallback(t *testing.T) {
 	if m.activeView != ViewSearch {
 		t.Errorf("expected fallback to search after closing last tab, got %d", m.activeView)
 	}
-	if m.videoTabs.Len() != 0 {
-		t.Errorf("expected 0 tabs, got %d", m.videoTabs.Len())
+	if m.tabs.Len() != 0 {
+		t.Errorf("expected 0 tabs, got %d", m.tabs.Len())
 	}
 }
 
@@ -688,8 +689,8 @@ func TestVideoMode_TabNumberKeys(t *testing.T) {
 	sendKey(tm, "4")
 	time.Sleep(200 * time.Millisecond)
 	m := quitAndGetVideoModel(t, tm)
-	if m.videoTabs.ActiveIdx() != 0 {
-		t.Errorf("expected tab index 0 after pressing 4, got %d", m.videoTabs.ActiveIdx())
+	if m.tabs.ActiveIdx() != 0 {
+		t.Errorf("expected tab index 0 after pressing 4, got %d", m.tabs.ActiveIdx())
 	}
 }
 
@@ -736,7 +737,7 @@ func TestVideoMode_URLInput_Cancel(t *testing.T) {
 	if m.urlInput.IsActive() {
 		t.Error("URL input should be closed after Esc")
 	}
-	if m.videoTabs.Len() != 0 {
+	if m.tabs.Len() != 0 {
 		t.Error("no tab should be opened after cancelling URL input")
 	}
 }
@@ -840,8 +841,8 @@ func TestBothModes_EscClosesTab(t *testing.T) {
 	mm := quitAndGetMusicModel(t, mtm)
 
 	// Both should have no dynamic tabs
-	if vm.videoTabs.Len() != 0 {
-		t.Errorf("video: expected 0 tabs after esc, got %d", vm.videoTabs.Len())
+	if vm.tabs.Len() != 0 {
+		t.Errorf("video: expected 0 tabs after esc, got %d", vm.tabs.Len())
 	}
 	if mm.tabs.Len() != 0 {
 		t.Errorf("music: expected 0 tabs after esc, got %d", mm.tabs.Len())
@@ -880,7 +881,7 @@ func TestVideoMode_ThumbnailLoadedWhileDetailTabActive(t *testing.T) {
 	m := New(&mockYTClient{authenticated: true}, cfg, Options{})
 
 	// Switch to a video tab so the detail view is active
-	m.activeView = ViewVideoTab
+	m.activeView = ViewDynamicTab
 
 	if m.listThumbList == nil {
 		t.Fatal("expected listThumbList to be non-nil")
@@ -1061,5 +1062,58 @@ func TestMusicMode_HomeThumbnailFetchTriggersAllShelves(t *testing.T) {
 	// even though the user is viewing the first shelf.
 	if !imgR.WasRequested("https://fake.test/trending.jpg") {
 		t.Error("expected FetchCmd to be called for album thumbnail in non-active home shelf")
+	}
+}
+
+func TestVideoMode_ChannelTabDedup(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_ch_001", Name: "Fake Channel"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+
+	// Open channel tab twice
+	sendSpecialKey(tm, tea.KeyEnter)
+	time.Sleep(300 * time.Millisecond)
+	sendKey(tm, "2") // back to subs
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEnter) // open same channel again
+	time.Sleep(300 * time.Millisecond)
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.tabs.Len() != 1 {
+		t.Errorf("expected 1 tab (dedup), got %d", m.tabs.Len())
+	}
+}
+
+func TestVideoMode_ChannelFromURL(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	// Simulate URL input submitting a channel URL
+	tm.Send(urlinput.SubmitMsg{Parsed: youtube.ParsedURL{Kind: youtube.URLChannel, ID: "UCfake_url_ch"}})
+	time.Sleep(500 * time.Millisecond)
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.tabs.Len() != 1 {
+		t.Errorf("expected 1 channel tab from URL, got %d", m.tabs.Len())
+	}
+	if m.activeView != ViewDynamicTab {
+		t.Errorf("expected ViewDynamicTab, got %d", m.activeView)
 	}
 }

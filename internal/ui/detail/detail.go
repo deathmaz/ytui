@@ -343,20 +343,10 @@ func scheduleClearTransmit() tea.Cmd {
 	})
 }
 
+var subTabNames = []string{"Info", "Comments"}
+
 func (m Model) renderSubTabBar() string {
-	tabs := []struct {
-		label string
-		idx   int
-	}{{"Info", tabInfo}, {"Comments", tabComments}}
-	var labels []string
-	for _, t := range tabs {
-		style := styles.SubTab
-		if m.activeTab == t.idx {
-			style = styles.ActiveSubTab
-		}
-		labels = append(labels, style.Render(t.label))
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, labels...)
+	return shared.RenderSubTabBar(subTabNames, m.activeTab)
 }
 
 func (m Model) View() string {

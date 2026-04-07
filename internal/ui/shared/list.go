@@ -3,7 +3,22 @@ package shared
 import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/deathmaz/ytui/internal/ui/styles"
 )
+
+// RenderSubTabBar renders a horizontal sub-tab bar using SubTab/ActiveSubTab styles.
+func RenderSubTabBar(names []string, activeIdx int) string {
+	labels := make([]string, len(names))
+	for i, name := range names {
+		s := styles.SubTab
+		if i == activeIdx {
+			s = styles.ActiveSubTab
+		}
+		labels[i] = s.Render(name)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, labels...)
+}
 
 // ShouldLoadMore returns true when the cursor is within threshold items
 // of the end of the list. Use this after list.Update() to trigger

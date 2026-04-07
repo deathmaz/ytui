@@ -28,6 +28,7 @@ type KeyMap struct {
 	Yank       key.Binding
 	Refresh    key.Binding
 	Auth       key.Binding
+	Channel    key.Binding
 
 	// Music-specific bindings
 	PlayAlbum key.Binding
@@ -64,6 +65,7 @@ func DefaultKeyMap() KeyMap {
 		Yank:       key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Refresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Auth:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "authenticate")),
+		Channel:    key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "channel")),
 
 		PlayAlbum: key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "play album")),
 		Enter:     key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -83,7 +85,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.PageUp, k.PageDown, k.HalfPageUp, k.HalfPageDn},
 		{k.Feed, k.Subs, k.Search, k.Back},
-		{k.Play, k.PlayPick, k.Download, k.Detail},
+		{k.Play, k.PlayPick, k.Download, k.Detail, k.Channel},
 		{k.Open, k.Yank, k.Refresh, k.Auth, k.Quit},
 	}
 }

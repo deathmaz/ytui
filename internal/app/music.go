@@ -1007,7 +1007,7 @@ func (m *MusicModel) renderHome() string {
 		return styles.Dim.Render("Home feed not loaded")
 	}
 
-	subBar := renderSubTabBar(m.homeSubs, m.homeSubIdx)
+	subBar := renderMusicSubTabBar(m.homeSubs, m.homeSubIdx)
 
 	ch := m.contentHeight()
 	overhead := lipgloss.Height(subBar)
@@ -1033,7 +1033,7 @@ func (m *MusicModel) renderLibrary() string {
 		return styles.Dim.Render("Press 'a' to authenticate to view library")
 	}
 
-	subBar := renderSubTabBar(m.librarySubs, m.librarySubIdx)
+	subBar := renderMusicSubTabBar(m.librarySubs, m.librarySubIdx)
 
 	var hint string
 	if m.librarySubIdx < len(m.librarySubs) && m.librarySubs[m.librarySubIdx].continuation != "" {
@@ -1069,21 +1069,12 @@ func (m *MusicModel) renderSearch() string {
 	return m.search.View()
 }
 
-var (
-	subTabStyle       = styles.SubTab
-	activeSubTabStyle = styles.ActiveSubTab
-)
-
-func renderSubTabBar(subs []subTab, activeIdx int) string {
-	var labels []string
+func renderMusicSubTabBar(subs []subTab, activeIdx int) string {
+	names := make([]string, len(subs))
 	for i, sub := range subs {
-		style := subTabStyle
-		if i == activeIdx {
-			style = activeSubTabStyle
-		}
-		labels = append(labels, style.Render(sub.title))
+		names[i] = sub.title
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, labels...)
+	return shared.RenderSubTabBar(names, activeIdx)
 }
 
 func (m *MusicModel) renderArtistPage(tab *musicTab) string {
@@ -1091,7 +1082,7 @@ func (m *MusicModel) renderArtistPage(tab *musicTab) string {
 		return styles.Dim.Render("No content")
 	}
 
-	subBar := renderSubTabBar(tab.artistSubs, tab.activeSubTab)
+	subBar := renderMusicSubTabBar(tab.artistSubs, tab.activeSubTab)
 
 	// Check if more items are available
 	var hint string

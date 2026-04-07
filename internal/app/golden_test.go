@@ -710,3 +710,112 @@ func TestGolden_Music_MultipleTabs(t *testing.T) {
 	sendSpecialKey(tm, tea.KeyEnter)
 	waitThenCapture(t, tm, "Track 1")
 }
+
+func TestGolden_Video_Channel_FromSubs(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_ch_001", Name: "Fake Channel", Handle: "@fakechannel", SubscriberCount: "100K subscribers"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "cv1", Title: "Channel Video One", ChannelName: "Fake Channel", ViewCount: "10K views", PublishedAt: "1 day ago", DurationStr: "8:00"},
+					{ID: "cv2", Title: "Channel Video Two", ChannelName: "Fake Channel", ViewCount: "5K views", PublishedAt: "3 days ago", DurationStr: "12:30"},
+				},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitThenCapture(t, tm, "Channel Video One")
+}
+
+func TestGolden_Video_Channel_FromSubs_WithThumbnails(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_ch_001", Name: "Fake Channel", Handle: "@fakechannel", SubscriberCount: "100K subscribers"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "cv1", Title: "Channel Video One", ChannelName: "Fake Channel", ViewCount: "10K views", PublishedAt: "1 day ago", DurationStr: "8:00",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/cv1.jpg", Width: 320}}},
+					{ID: "cv2", Title: "Channel Video Two", ChannelName: "Fake Channel", ViewCount: "5K views", PublishedAt: "3 days ago", DurationStr: "12:30",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/cv2.jpg", Width: 320}}},
+				},
+			}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitThenCapture(t, tm, "Channel Video One")
+}
+
+func TestGolden_Video_Channel_CKey(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "s1", Title: "Test Search Result", ChannelName: "Test Channel", ChannelID: "UCfake_test_ch", ViewCount: "1K views", PublishedAt: "1 day ago", DurationStr: "5:00"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "cv1", Title: "Channel Vid From C Key", ChannelName: "Test Channel", ViewCount: "2K views", PublishedAt: "2 days ago", DurationStr: "10:00"},
+				},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	waitForContent(t, tm, "Test Search Result")
+	sendKey(tm, "c")
+	waitThenCapture(t, tm, "Channel Vid From C Key")
+}
+
+func TestGolden_Video_Channel_CKey_WithThumbnails(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "s1", Title: "Test Search Result", ChannelName: "Test Channel", ChannelID: "UCfake_test_ch", ViewCount: "1K views", PublishedAt: "1 day ago", DurationStr: "5:00"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "cv1", Title: "Channel Vid From C Key", ChannelName: "Test Channel", ViewCount: "2K views", PublishedAt: "2 days ago", DurationStr: "10:00",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/cv1.jpg", Width: 320}}},
+				},
+			}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	tm := newTestVideoProgramFull(t, client, cfg, Options{SearchQuery: "test"})
+	waitForContent(t, tm, "Test Search Result")
+	sendKey(tm, "c")
+	waitThenCapture(t, tm, "Channel Vid From C Key")
+}
