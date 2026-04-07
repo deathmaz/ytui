@@ -1,0 +1,94 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "title": "Videos",
+            "selected": true,
+            "content": {
+              "richGridRenderer": {
+                "contents": [
+                  {
+                    "richItemRenderer": {
+                      "content": {
+                        "videoRenderer": {
+                          "videoId": "fake_ch_vid_001",
+                          "title": {
+                            "runs": [{"text": "Fake Channel Video One"}]
+                          },
+                          "ownerText": {
+                            "runs": [
+                              {
+                                "text": "Fake Channel",
+                                "navigationEndpoint": {
+                                  "browseEndpoint": {
+                                    "browseId": "UCfake_channel_001"
+                                  }
+                                }
+                              }
+                            ]
+                          },
+                          "lengthText": {"simpleText": "12:34"},
+                          "viewCountText": {"simpleText": "1,234 views"},
+                          "publishedTimeText": {"simpleText": "3 days ago"},
+                          "thumbnail": {
+                            "thumbnails": [
+                              {"url": "https://i.ytimg.com/vi/fake_ch_vid_001/default.jpg", "width": 120, "height": 90},
+                              {"url": "https://i.ytimg.com/vi/fake_ch_vid_001/hqdefault.jpg", "width": 480, "height": 360}
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "richItemRenderer": {
+                      "content": {
+                        "videoRenderer": {
+                          "videoId": "fake_ch_vid_002",
+                          "title": {
+                            "runs": [{"text": "Fake Channel Video Two"}]
+                          },
+                          "ownerText": {
+                            "runs": [
+                              {
+                                "text": "Fake Channel",
+                                "navigationEndpoint": {
+                                  "browseEndpoint": {
+                                    "browseId": "UCfake_channel_001"
+                                  }
+                                }
+                              }
+                            ]
+                          },
+                          "lengthText": {"simpleText": "5:00"},
+                          "viewCountText": {"simpleText": "567 views"},
+                          "publishedTimeText": {"simpleText": "1 week ago"},
+                          "thumbnail": {
+                            "thumbnails": [
+                              {"url": "https://i.ytimg.com/vi/fake_ch_vid_002/hqdefault.jpg", "width": 480, "height": 360}
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "continuationItemRenderer": {
+                      "continuationEndpoint": {
+                        "continuationCommand": {
+                          "token": "fake_channel_videos_continuation_token"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

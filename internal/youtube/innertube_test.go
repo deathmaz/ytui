@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/tidwall/gjson"
 )
 
 func loadFixture(t *testing.T, path string) map[string]interface{} {
@@ -176,6 +178,269 @@ func TestVideoURL(t *testing.T) {
 	want := "https://www.youtube.com/watch?v=abc123"
 	if got != want {
 		t.Errorf("VideoURL = %q, want %q", got, want)
+	}
+}
+
+func TestParseChannelVideos(t *testing.T) {
+	raw := loadFixture(t, "testdata/fake_channel_videos_response.json")
+	data, err := toGJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var videos []Video
+	var nextToken string
+	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		contents := tr.Get("content.richGridRenderer.contents")
+		parseChannelVideoItems(contents, &videos, &nextToken)
+		return false
+	})
+
+	if len(videos) != 2 {
+		t.Fatalf("expected 2 videos, got %d", len(videos))
+	}
+
+	v := videos[0]
+	if v.ID != "fake_ch_vid_001" {
+		t.Errorf("ID = %q, want fake_ch_vid_001", v.ID)
+	}
+	if v.Title != "Fake Channel Video One" {
+		t.Errorf("Title = %q", v.Title)
+	}
+	if v.ChannelName != "Fake Channel" {
+		t.Errorf("ChannelName = %q", v.ChannelName)
+	}
+	if v.DurationStr != "12:34" {
+		t.Errorf("DurationStr = %q", v.DurationStr)
+	}
+	if v.ViewCount != "1,234 views" {
+		t.Errorf("ViewCount = %q", v.ViewCount)
+	}
+	if len(v.Thumbnails) == 0 {
+		t.Error("expected thumbnails")
+	}
+	if v.URL != VideoURL(v.ID) {
+		t.Errorf("URL = %q", v.URL)
+	}
+
+	if nextToken != "fake_channel_videos_continuation_token" {
+		t.Errorf("NextToken = %q", nextToken)
+	}
+}
+
+func TestParseChannelVideosContinuation(t *testing.T) {
+	raw := loadFixture(t, "testdata/fake_channel_videos_continuation.json")
+	data, err := toGJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var videos []Video
+	var nextToken string
+	data.Get("onResponseReceivedActions").ForEach(func(_, action gjson.Result) bool {
+		items := action.Get("appendContinuationItemsAction.continuationItems")
+		if items.Exists() {
+			parseChannelVideoItems(items, &videos, &nextToken)
+		}
+		return true
+	})
+
+	if len(videos) != 1 {
+		t.Fatalf("expected 1 video, got %d", len(videos))
+	}
+	if videos[0].ID != "fake_ch_vid_003" {
+		t.Errorf("ID = %q", videos[0].ID)
+	}
+}
+
+func TestParseChannelPlaylists(t *testing.T) {
+	raw := loadFixture(t, "testdata/fake_channel_playlists_response.json")
+	data, err := toGJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var playlists []Playlist
+	var nextToken string
+	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		sections := tr.Get("content.sectionListRenderer.contents")
+		sections.ForEach(func(_, section gjson.Result) bool {
+			items := section.Get("itemSectionRenderer.contents.0.gridRenderer.items")
+			if items.Exists() {
+				parseChannelPlaylistItems(items, &playlists, &nextToken)
+			}
+			return true
+		})
+		return false
+	})
+
+	if len(playlists) != 2 {
+		t.Fatalf("expected 2 playlists, got %d", len(playlists))
+	}
+
+	p := playlists[0]
+	if p.ID != "PLfake_playlist_001" {
+		t.Errorf("ID = %q", p.ID)
+	}
+	if p.Title != "Fake Playlist One" {
+		t.Errorf("Title = %q", p.Title)
+	}
+	if p.VideoCount != "12" {
+		t.Errorf("VideoCount = %q", p.VideoCount)
+	}
+	if p.URL != PlaylistURL(p.ID) {
+		t.Errorf("URL = %q", p.URL)
+	}
+	if len(p.Thumbnails) == 0 {
+		t.Error("expected thumbnails")
+	}
+
+	if nextToken != "fake_playlists_continuation_token" {
+		t.Errorf("NextToken = %q", nextToken)
+	}
+}
+
+func TestParseChannelPosts(t *testing.T) {
+	raw := loadFixture(t, "testdata/fake_channel_posts_response.json")
+	data, err := toGJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var posts []Post
+	var nextToken string
+	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		sections := tr.Get("content.sectionListRenderer.contents")
+		sections.ForEach(func(_, section gjson.Result) bool {
+			section.Get("itemSectionRenderer.contents").ForEach(func(_, item gjson.Result) bool {
+				bpt := item.Get("backstagePostThreadRenderer.post.backstagePostRenderer")
+				if bpt.Exists() {
+					posts = append(posts, parseBackstagePost(bpt))
+				}
+				return true
+			})
+			token := section.Get("continuationItemRenderer.continuationEndpoint.continuationCommand.token")
+			if token.Exists() {
+				nextToken = token.String()
+			}
+			return true
+		})
+		return false
+	})
+
+	if len(posts) != 2 {
+		t.Fatalf("expected 2 posts, got %d", len(posts))
+	}
+
+	p := posts[0]
+	if p.ID != "fake_post_001" {
+		t.Errorf("ID = %q", p.ID)
+	}
+	if p.AuthorName != "Fake Channel" {
+		t.Errorf("AuthorName = %q", p.AuthorName)
+	}
+	if p.AuthorID != "UCfake_channel_001" {
+		t.Errorf("AuthorID = %q", p.AuthorID)
+	}
+	if p.Content != "This is a fake community post with some bold text" {
+		t.Errorf("Content = %q", p.Content)
+	}
+	if p.LikeCount != "1.2K" {
+		t.Errorf("LikeCount = %q", p.LikeCount)
+	}
+	if p.PublishedAt != "2 days ago" {
+		t.Errorf("PublishedAt = %q", p.PublishedAt)
+	}
+	if p.CommentsToken != "fake_post_comments_token_001" {
+		t.Errorf("CommentsToken = %q", p.CommentsToken)
+	}
+	if len(p.Thumbnails) == 0 {
+		t.Error("expected thumbnails for post with image")
+	}
+
+	// Second post has no image
+	if len(posts[1].Thumbnails) != 0 {
+		t.Error("expected no thumbnails for post without image")
+	}
+
+	if nextToken != "fake_posts_continuation_token" {
+		t.Errorf("NextToken = %q", nextToken)
+	}
+}
+
+func TestParsePlaylistVideos(t *testing.T) {
+	raw := loadFixture(t, "testdata/fake_playlist_videos_response.json")
+	data, err := toGJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var videos []Video
+	var nextToken string
+	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		sections := tr.Get("content.sectionListRenderer.contents")
+		sections.ForEach(func(_, section gjson.Result) bool {
+			section.Get("itemSectionRenderer.contents").ForEach(func(_, content gjson.Result) bool {
+				items := content.Get("playlistVideoListRenderer.contents")
+				if items.Exists() {
+					parsePlaylistVideoItems(items, &videos, &nextToken)
+				}
+				return true
+			})
+			return true
+		})
+		return false
+	})
+
+	if len(videos) != 2 {
+		t.Fatalf("expected 2 videos, got %d", len(videos))
+	}
+
+	v := videos[0]
+	if v.ID != "fake_plv_001" {
+		t.Errorf("ID = %q", v.ID)
+	}
+	if v.Title != "Playlist Video One" {
+		t.Errorf("Title = %q", v.Title)
+	}
+	if v.ChannelName != "Fake Creator" {
+		t.Errorf("ChannelName = %q", v.ChannelName)
+	}
+	if v.ChannelID != "UCfake_creator_001" {
+		t.Errorf("ChannelID = %q", v.ChannelID)
+	}
+	if v.DurationStr != "10:00" {
+		t.Errorf("DurationStr = %q", v.DurationStr)
+	}
+	if v.URL != VideoURL(v.ID) {
+		t.Errorf("URL = %q", v.URL)
+	}
+	if len(v.Thumbnails) == 0 {
+		t.Error("expected thumbnails")
+	}
+
+	if nextToken != "fake_playlist_continuation_token" {
+		t.Errorf("NextToken = %q", nextToken)
 	}
 }
 

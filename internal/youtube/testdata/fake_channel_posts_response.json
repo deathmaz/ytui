@@ -1,0 +1,108 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "title": "Community",
+            "selected": true,
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "backstagePostThreadRenderer": {
+                            "post": {
+                              "backstagePostRenderer": {
+                                "postId": "fake_post_001",
+                                "authorText": {
+                                  "runs": [{"text": "Fake Channel"}]
+                                },
+                                "authorEndpoint": {
+                                  "browseEndpoint": {
+                                    "browseId": "UCfake_channel_001"
+                                  }
+                                },
+                                "contentText": {
+                                  "runs": [
+                                    {"text": "This is a fake community post with "},
+                                    {"text": "some bold text"}
+                                  ]
+                                },
+                                "voteCount": {"simpleText": "1.2K"},
+                                "publishedTimeText": {
+                                  "runs": [{"text": "2 days ago"}]
+                                },
+                                "actionButtons": {
+                                  "commentActionButtonsRenderer": {
+                                    "replyButton": {
+                                      "buttonRenderer": {
+                                        "navigationEndpoint": {
+                                          "continuationCommand": {
+                                            "token": "fake_post_comments_token_001"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                "backstageImageRenderer": {
+                                  "image": {
+                                    "thumbnails": [
+                                      {"url": "https://yt3.ggpht.com/fake_post_image.jpg", "width": 640, "height": 480}
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "backstagePostThreadRenderer": {
+                            "post": {
+                              "backstagePostRenderer": {
+                                "postId": "fake_post_002",
+                                "authorText": {
+                                  "runs": [{"text": "Fake Channel"}]
+                                },
+                                "authorEndpoint": {
+                                  "browseEndpoint": {
+                                    "browseId": "UCfake_channel_001"
+                                  }
+                                },
+                                "contentText": {
+                                  "runs": [
+                                    {"text": "Another post without an image"}
+                                  ]
+                                },
+                                "voteCount": {"simpleText": "456"},
+                                "publishedTimeText": {
+                                  "runs": [{"text": "1 week ago"}]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "continuationItemRenderer": {
+                      "continuationEndpoint": {
+                        "continuationCommand": {
+                          "token": "fake_posts_continuation_token"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

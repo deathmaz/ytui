@@ -1,0 +1,69 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "title": "Playlists",
+            "selected": true,
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "gridRenderer": {
+                            "items": [
+                              {
+                                "gridPlaylistRenderer": {
+                                  "playlistId": "PLfake_playlist_001",
+                                  "title": {
+                                    "runs": [{"text": "Fake Playlist One"}]
+                                  },
+                                  "videoCountShortText": {"simpleText": "12"},
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      {"url": "https://i.ytimg.com/vi/fake_pl_thumb/hqdefault.jpg", "width": 480, "height": 360}
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "gridPlaylistRenderer": {
+                                  "playlistId": "PLfake_playlist_002",
+                                  "title": {
+                                    "runs": [{"text": "Fake Playlist Two"}]
+                                  },
+                                  "videoCountShortText": {"simpleText": "5"},
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      {"url": "https://i.ytimg.com/vi/fake_pl_thumb2/hqdefault.jpg", "width": 480, "height": 360}
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "continuationItemRenderer": {
+                                  "continuationEndpoint": {
+                                    "continuationCommand": {
+                                      "token": "fake_playlists_continuation_token"
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

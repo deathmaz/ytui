@@ -1,0 +1,92 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "selected": true,
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "playlistVideoListRenderer": {
+                            "contents": [
+                              {
+                                "playlistVideoRenderer": {
+                                  "videoId": "fake_plv_001",
+                                  "title": {
+                                    "runs": [{"text": "Playlist Video One"}]
+                                  },
+                                  "shortBylineText": {
+                                    "runs": [
+                                      {
+                                        "text": "Fake Creator",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UCfake_creator_001"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "lengthText": {"simpleText": "10:00"},
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      {"url": "https://i.ytimg.com/vi/fake_plv_001/hqdefault.jpg", "width": 480, "height": 360}
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "playlistVideoRenderer": {
+                                  "videoId": "fake_plv_002",
+                                  "title": {
+                                    "runs": [{"text": "Playlist Video Two"}]
+                                  },
+                                  "shortBylineText": {
+                                    "runs": [
+                                      {
+                                        "text": "Another Creator",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UCfake_creator_002"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "lengthText": {"simpleText": "3:45"},
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      {"url": "https://i.ytimg.com/vi/fake_plv_002/hqdefault.jpg", "width": 480, "height": 360}
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "continuationItemRenderer": {
+                                  "continuationEndpoint": {
+                                    "continuationCommand": {
+                                      "token": "fake_playlist_continuation_token"
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

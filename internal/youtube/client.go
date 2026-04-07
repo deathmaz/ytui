@@ -25,6 +25,18 @@ type Client interface {
 	// GetChannelVideos returns videos from a channel.
 	GetChannelVideos(ctx context.Context, channelID string, pageToken string) (*Page[Video], error)
 
+	// GetChannelPlaylists returns playlists from a channel.
+	GetChannelPlaylists(ctx context.Context, channelID string, pageToken string) (*Page[Playlist], error)
+
+	// GetChannelPosts returns community posts from a channel.
+	GetChannelPosts(ctx context.Context, channelID string, pageToken string) (*Page[Post], error)
+
+	// GetPlaylistVideos returns videos in a playlist.
+	GetPlaylistVideos(ctx context.Context, playlistID string, pageToken string) (*Page[Video], error)
+
+	// GetPostComments returns comments on a community post.
+	GetPostComments(ctx context.Context, postID string, pageToken string) (*Page[Comment], error)
+
 	// IsAuthenticated reports whether the client has valid credentials.
 	IsAuthenticated() bool
 }

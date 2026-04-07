@@ -1,0 +1,42 @@
+{
+  "onResponseReceivedActions": [
+    {
+      "appendContinuationItemsAction": {
+        "continuationItems": [
+          {
+            "richItemRenderer": {
+              "content": {
+                "videoRenderer": {
+                  "videoId": "fake_ch_vid_003",
+                  "title": {
+                    "runs": [{"text": "Fake Channel Video Three"}]
+                  },
+                  "ownerText": {
+                    "runs": [
+                      {
+                        "text": "Fake Channel",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UCfake_channel_001"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "lengthText": {"simpleText": "8:15"},
+                  "viewCountText": {"simpleText": "999 views"},
+                  "publishedTimeText": {"simpleText": "2 weeks ago"},
+                  "thumbnail": {
+                    "thumbnails": [
+                      {"url": "https://i.ytimg.com/vi/fake_ch_vid_003/hqdefault.jpg", "width": 480, "height": 360}
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

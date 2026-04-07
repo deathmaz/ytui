@@ -233,14 +233,7 @@ func (c *InnerTubeClient) GetVideo(ctx context.Context, id string) (*Video, erro
 		URL:         VideoURL(vd.Get("videoId").String()),
 	}
 
-	vd.Get("thumbnail.thumbnails").ForEach(func(_, t gjson.Result) bool {
-		v.Thumbnails = append(v.Thumbnails, Thumbnail{
-			URL:    t.Get("url").String(),
-			Width:  int(t.Get("width").Int()),
-			Height: int(t.Get("height").Int()),
-		})
-		return true
-	})
+	v.Thumbnails = parseThumbnails(vd.Get("thumbnail.thumbnails"))
 
 	// Enrich with Next endpoint data (formatted views, likes, date, subscriber count)
 	nr := <-nextCh
@@ -503,14 +496,7 @@ func parseChannelSections(sections gjson.Result, channels *[]Channel, nextToken 
 					SubscriberCount: subCount,
 					URL:             "https://www.youtube.com/channel/" + cr.Get("channelId").String(),
 				}
-				cr.Get("thumbnail.thumbnails").ForEach(func(_, t gjson.Result) bool {
-					ch.Thumbnails = append(ch.Thumbnails, Thumbnail{
-						URL:    t.Get("url").String(),
-						Width:  int(t.Get("width").Int()),
-						Height: int(t.Get("height").Int()),
-					})
-					return true
-				})
+				ch.Thumbnails = parseThumbnails(cr.Get("thumbnail.thumbnails"))
 				*channels = append(*channels, ch)
 				return true
 			})
@@ -579,18 +565,104 @@ func (c *InnerTubeClient) GetFeed(ctx context.Context, pageToken string) (*Page[
 	}, nil
 }
 
+// parseFeedItems parses video items from feed/channel richGridRenderer contents.
+// Delegates to parseChannelVideoItems which handles all known video item formats.
 func parseFeedItems(contents gjson.Result, videos *[]Video, nextToken *string) {
+	parseChannelVideoItems(contents, videos, nextToken)
+}
+
+// Channel tab params (base64 protobuf filters).
+const (
+	channelVideosParams    = "EgZ2aWRlb3PyBgQKAjoA"
+	channelPlaylistsParams = "EglwbGF5bGlzdHPyBgQKAkIA"
+	channelPostsParams     = "Egljb21tdW5pdHnyBgQKAhgB"
+)
+
+// browseChannelTab calls Browse for a channel tab. On initial load it sends
+// the tab params; on continuation it sends the page token instead.
+func (c *InnerTubeClient) browseChannelTab(ctx context.Context, channelID, params, pageToken string) (gjson.Result, error) {
+	var cont, paramsPtr *string
+	if pageToken != "" {
+		cont = &pageToken
+	} else {
+		paramsPtr = &params
+	}
+	raw, err := c.it.Browse(ctx, &channelID, paramsPtr, cont)
+	if err != nil {
+		return gjson.Result{}, err
+	}
+	return toGJSON(raw)
+}
+
+func (c *InnerTubeClient) GetChannelVideos(ctx context.Context, channelID string, pageToken string) (*Page[Video], error) {
+	data, err := c.browseChannelTab(ctx, channelID, channelVideosParams, pageToken)
+	if err != nil {
+		return nil, fmt.Errorf("innertube channel videos: %w", err)
+	}
+
+	var videos []Video
+	var nextToken string
+
+	// Initial response: selected tab → richGridRenderer.contents
+	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		contents := tr.Get("content.richGridRenderer.contents")
+		if contents.Exists() {
+			parseChannelVideoItems(contents, &videos, &nextToken)
+			return false
+		}
+		// Fallback: sectionListRenderer (some channels use this)
+		sections := tr.Get("content.sectionListRenderer.contents")
+		sections.ForEach(func(_, section gjson.Result) bool {
+			items := section.Get("itemSectionRenderer.contents.0.gridRenderer.items")
+			if items.Exists() {
+				parseChannelVideoItems(items, &videos, &nextToken)
+			}
+			return true
+		})
+		return false
+	})
+
+	// Continuation response
+	if len(videos) == 0 {
+		data.Get("onResponseReceivedActions").ForEach(func(_, action gjson.Result) bool {
+			items := action.Get("appendContinuationItemsAction.continuationItems")
+			if items.Exists() {
+				parseChannelVideoItems(items, &videos, &nextToken)
+			}
+			return true
+		})
+	}
+
+	return &Page[Video]{
+		Items:     videos,
+		NextToken: nextToken,
+		HasMore:   nextToken != "",
+	}, nil
+}
+
+func parseChannelVideoItems(contents gjson.Result, videos *[]Video, nextToken *string) {
 	contents.ForEach(func(_, item gjson.Result) bool {
-		// Classic videoRenderer
+		// richItemRenderer wrapping videoRenderer
 		vr := item.Get("richItemRenderer.content.videoRenderer")
 		if vr.Exists() {
 			*videos = append(*videos, parseVideoRenderer(vr))
 			return true
 		}
-		// New lockupViewModel format
+		// richItemRenderer wrapping lockupViewModel
 		lvm := item.Get("richItemRenderer.content.lockupViewModel")
 		if lvm.Exists() {
 			*videos = append(*videos, parseLockupViewModel(lvm))
+			return true
+		}
+		// gridVideoRenderer (older layout)
+		gvr := item.Get("gridVideoRenderer")
+		if gvr.Exists() {
+			*videos = append(*videos, parseGridVideoRenderer(gvr))
 			return true
 		}
 		// Continuation token
@@ -602,8 +674,298 @@ func parseFeedItems(contents gjson.Result, videos *[]Video, nextToken *string) {
 	})
 }
 
-func (c *InnerTubeClient) GetChannelVideos(ctx context.Context, channelID string, pageToken string) (*Page[Video], error) {
-	return nil, fmt.Errorf("not implemented")
+func parseGridVideoRenderer(gvr gjson.Result) Video {
+	v := Video{
+		ID:          gvr.Get("videoId").String(),
+		Title:       gvr.Get("title.runs.0.text").String(),
+		DurationStr: gvr.Get("thumbnailOverlays.0.thumbnailOverlayTimeStatusRenderer.text.simpleText").String(),
+		ViewCount:   gvr.Get("viewCountText.simpleText").String(),
+		PublishedAt: gvr.Get("publishedTimeText.simpleText").String(),
+	}
+	v.URL = VideoURL(v.ID)
+	v.Thumbnails = parseThumbnails(gvr.Get("thumbnail.thumbnails"))
+	return v
+}
+
+func (c *InnerTubeClient) GetChannelPlaylists(ctx context.Context, channelID string, pageToken string) (*Page[Playlist], error) {
+	data, err := c.browseChannelTab(ctx, channelID, channelPlaylistsParams, pageToken)
+	if err != nil {
+		return nil, fmt.Errorf("innertube channel playlists: %w", err)
+	}
+
+	var playlists []Playlist
+	var nextToken string
+
+	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		sections := tr.Get("content.sectionListRenderer.contents")
+		sections.ForEach(func(_, section gjson.Result) bool {
+			items := section.Get("itemSectionRenderer.contents.0.gridRenderer.items")
+			if items.Exists() {
+				parseChannelPlaylistItems(items, &playlists, &nextToken)
+			}
+			return true
+		})
+		return false
+	})
+
+	// Continuation response
+	if len(playlists) == 0 {
+		data.Get("onResponseReceivedActions").ForEach(func(_, action gjson.Result) bool {
+			items := action.Get("appendContinuationItemsAction.continuationItems")
+			if items.Exists() {
+				parseChannelPlaylistItems(items, &playlists, &nextToken)
+			}
+			return true
+		})
+	}
+
+	return &Page[Playlist]{
+		Items:     playlists,
+		NextToken: nextToken,
+		HasMore:   nextToken != "",
+	}, nil
+}
+
+func parseChannelPlaylistItems(contents gjson.Result, playlists *[]Playlist, nextToken *string) {
+	contents.ForEach(func(_, item gjson.Result) bool {
+		gpr := item.Get("gridPlaylistRenderer")
+		if gpr.Exists() {
+			*playlists = append(*playlists, parseGridPlaylistRenderer(gpr))
+			return true
+		}
+		// lockupViewModel for playlists
+		lvm := item.Get("lockupViewModel")
+		if lvm.Exists() {
+			if p, ok := parseLockupPlaylist(lvm); ok {
+				*playlists = append(*playlists, p)
+			}
+			return true
+		}
+		// Continuation token
+		token := item.Get("continuationItemRenderer.continuationEndpoint.continuationCommand.token")
+		if token.Exists() {
+			*nextToken = token.String()
+		}
+		return true
+	})
+}
+
+func parseGridPlaylistRenderer(gpr gjson.Result) Playlist {
+	id := gpr.Get("playlistId").String()
+	p := Playlist{
+		ID:         id,
+		Title:      gpr.Get("title.runs.0.text").String(),
+		VideoCount: gpr.Get("videoCountShortText.simpleText").String(),
+		URL:        PlaylistURL(id),
+	}
+	p.Thumbnails = parseThumbnails(gpr.Get("thumbnail.thumbnails"))
+	return p
+}
+
+func parseLockupPlaylist(lvm gjson.Result) (Playlist, bool) {
+	id := lvm.Get("contentId").String()
+	if id == "" {
+		return Playlist{}, false
+	}
+	meta := lvm.Get("metadata.lockupMetadataViewModel")
+	p := Playlist{
+		ID:    id,
+		Title: meta.Get("title.content").String(),
+		URL:   PlaylistURL(id),
+	}
+	// Video count from metadata
+	p.VideoCount = meta.Get("metadata.contentMetadataViewModel.metadataRows.0.metadataParts.0.text.content").String()
+
+	return p, true
+}
+
+func (c *InnerTubeClient) GetChannelPosts(ctx context.Context, channelID string, pageToken string) (*Page[Post], error) {
+	data, err := c.browseChannelTab(ctx, channelID, channelPostsParams, pageToken)
+	if err != nil {
+		return nil, fmt.Errorf("innertube channel posts: %w", err)
+	}
+
+	var posts []Post
+	var nextToken string
+
+	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		sections := tr.Get("content.sectionListRenderer.contents")
+		sections.ForEach(func(_, section gjson.Result) bool {
+			section.Get("itemSectionRenderer.contents").ForEach(func(_, item gjson.Result) bool {
+				bpt := item.Get("backstagePostThreadRenderer.post.backstagePostRenderer")
+				if bpt.Exists() {
+					posts = append(posts, parseBackstagePost(bpt))
+				}
+				return true
+			})
+			// Continuation token
+			token := section.Get("continuationItemRenderer.continuationEndpoint.continuationCommand.token")
+			if token.Exists() {
+				nextToken = token.String()
+			}
+			return true
+		})
+		return false
+	})
+
+	// Continuation response
+	if len(posts) == 0 {
+		data.Get("onResponseReceivedActions").ForEach(func(_, action gjson.Result) bool {
+			items := action.Get("appendContinuationItemsAction.continuationItems")
+			if !items.Exists() {
+				return true
+			}
+			items.ForEach(func(_, item gjson.Result) bool {
+				bpt := item.Get("backstagePostThreadRenderer.post.backstagePostRenderer")
+				if bpt.Exists() {
+					posts = append(posts, parseBackstagePost(bpt))
+					return true
+				}
+				token := item.Get("continuationItemRenderer.continuationEndpoint.continuationCommand.token")
+				if token.Exists() {
+					nextToken = token.String()
+				}
+				return true
+			})
+			return true
+		})
+	}
+
+	return &Page[Post]{
+		Items:     posts,
+		NextToken: nextToken,
+		HasMore:   nextToken != "",
+	}, nil
+}
+
+func parseBackstagePost(bpr gjson.Result) Post {
+	var b strings.Builder
+	bpr.Get("contentText.runs").ForEach(func(_, run gjson.Result) bool {
+		b.WriteString(run.Get("text").String())
+		return true
+	})
+
+	p := Post{
+		ID:            bpr.Get("postId").String(),
+		AuthorName:    bpr.Get("authorText.runs.0.text").String(),
+		AuthorID:      bpr.Get("authorEndpoint.browseEndpoint.browseId").String(),
+		Content:       b.String(),
+		LikeCount:     bpr.Get("voteCount.simpleText").String(),
+		PublishedAt:   bpr.Get("publishedTimeText.runs.0.text").String(),
+		CommentsToken: bpr.Get("actionButtons.commentActionButtonsRenderer.replyButton.buttonRenderer.navigationEndpoint.continuationCommand.token").String(),
+		Thumbnails:    parseThumbnails(bpr.Get("backstageImageRenderer.image.thumbnails")),
+	}
+
+	return p
+}
+
+func (c *InnerTubeClient) GetPlaylistVideos(ctx context.Context, playlistID string, pageToken string) (*Page[Video], error) {
+	browseID := "VL" + playlistID
+	var cont *string
+	if pageToken != "" {
+		cont = &pageToken
+	}
+	raw, err := c.it.Browse(ctx, &browseID, nil, cont)
+	if err != nil {
+		return nil, fmt.Errorf("innertube playlist videos: %w", err)
+	}
+
+	data, err := toGJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	var videos []Video
+	var nextToken string
+
+	// Initial response: twoColumnBrowseResultsRenderer.tabs[].tabRenderer
+	//   .content.sectionListRenderer.contents[].itemSectionRenderer.contents[]
+	//   .playlistVideoListRenderer.contents[]
+	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		sections := tr.Get("content.sectionListRenderer.contents")
+		sections.ForEach(func(_, section gjson.Result) bool {
+			section.Get("itemSectionRenderer.contents").ForEach(func(_, content gjson.Result) bool {
+				items := content.Get("playlistVideoListRenderer.contents")
+				if items.Exists() {
+					parsePlaylistVideoItems(items, &videos, &nextToken)
+				}
+				return true
+			})
+			return true
+		})
+		return false
+	})
+
+	// Continuation response
+	if len(videos) == 0 {
+		data.Get("onResponseReceivedActions").ForEach(func(_, action gjson.Result) bool {
+			items := action.Get("appendContinuationItemsAction.continuationItems")
+			if items.Exists() {
+				parsePlaylistVideoItems(items, &videos, &nextToken)
+			}
+			return true
+		})
+	}
+
+	return &Page[Video]{
+		Items:     videos,
+		NextToken: nextToken,
+		HasMore:   nextToken != "",
+	}, nil
+}
+
+func parsePlaylistVideoItems(contents gjson.Result, videos *[]Video, nextToken *string) {
+	contents.ForEach(func(_, item gjson.Result) bool {
+		pvr := item.Get("playlistVideoRenderer")
+		if pvr.Exists() {
+			*videos = append(*videos, parsePlaylistVideoRenderer(pvr))
+			return true
+		}
+		token := item.Get("continuationItemRenderer.continuationEndpoint.continuationCommand.token")
+		if token.Exists() {
+			*nextToken = token.String()
+		}
+		return true
+	})
+}
+
+func parsePlaylistVideoRenderer(pvr gjson.Result) Video {
+	v := Video{
+		ID:          pvr.Get("videoId").String(),
+		Title:       pvr.Get("title.runs.0.text").String(),
+		ChannelName: pvr.Get("shortBylineText.runs.0.text").String(),
+		ChannelID:   pvr.Get("shortBylineText.runs.0.navigationEndpoint.browseEndpoint.browseId").String(),
+		DurationStr: pvr.Get("lengthText.simpleText").String(),
+	}
+	v.URL = VideoURL(v.ID)
+	v.Thumbnails = parseThumbnails(pvr.Get("thumbnail.thumbnails"))
+	return v
+}
+
+func (c *InnerTubeClient) GetPostComments(ctx context.Context, postID string, pageToken string) (*Page[Comment], error) {
+	if pageToken == "" {
+		return &Page[Comment]{}, nil
+	}
+	raw, err := c.it.Next(ctx, nil, nil, nil, nil, &pageToken)
+	if err != nil {
+		return nil, fmt.Errorf("innertube post comments: %w", err)
+	}
+	return parseCommentsResponse(raw)
 }
 
 func (c *InnerTubeClient) IsAuthenticated() bool {
@@ -663,28 +1025,17 @@ func parseSearchResponse(raw map[string]interface{}) (*Page[Video], error) {
 
 // parseVideoRenderer extracts a Video from a videoRenderer JSON object.
 func parseVideoRenderer(vr gjson.Result) Video {
-	channelID := vr.Get("ownerText.runs.0.navigationEndpoint.browseEndpoint.browseId").String()
-
 	v := Video{
 		ID:          vr.Get("videoId").String(),
 		Title:       vr.Get("title.runs.0.text").String(),
 		ChannelName: vr.Get("ownerText.runs.0.text").String(),
-		ChannelID:   channelID,
+		ChannelID:   vr.Get("ownerText.runs.0.navigationEndpoint.browseEndpoint.browseId").String(),
 		DurationStr: vr.Get("lengthText.simpleText").String(),
 		ViewCount:   vr.Get("viewCountText.simpleText").String(),
 		PublishedAt: vr.Get("publishedTimeText.simpleText").String(),
 	}
 	v.URL = VideoURL(v.ID)
-
-	vr.Get("thumbnail.thumbnails").ForEach(func(_, t gjson.Result) bool {
-		v.Thumbnails = append(v.Thumbnails, Thumbnail{
-			URL:    t.Get("url").String(),
-			Width:  int(t.Get("width").Int()),
-			Height: int(t.Get("height").Int()),
-		})
-		return true
-	})
-
+	v.Thumbnails = parseThumbnails(vr.Get("thumbnail.thumbnails"))
 	return v
 }
 

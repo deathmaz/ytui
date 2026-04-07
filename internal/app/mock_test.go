@@ -18,7 +18,11 @@ type mockYTClient struct {
 	getRepliesFn  func(ctx context.Context, commentID, token string) (*youtube.Page[youtube.Comment], error)
 	getSubsFn     func(ctx context.Context, token string) (*youtube.Page[youtube.Channel], error)
 	getFeedFn     func(ctx context.Context, token string) (*youtube.Page[youtube.Video], error)
-	getChannelFn  func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error)
+	getChannelVideosFn          func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error)
+	getChannelPlaylistsFn func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Playlist], error)
+	getChannelPostsFn     func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Post], error)
+	getPlaylistVideosFn   func(ctx context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error)
+	getPostCommentsFn     func(ctx context.Context, postID, token string) (*youtube.Page[youtube.Comment], error)
 
 	// Call tracking
 	feedCalls   []string // tokens passed to GetFeed
@@ -86,10 +90,38 @@ func (m *mockYTClient) GetFeed(ctx context.Context, token string) (*youtube.Page
 }
 
 func (m *mockYTClient) GetChannelVideos(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
-	if m.getChannelFn != nil {
-		return m.getChannelFn(ctx, channelID, token)
+	if m.getChannelVideosFn != nil {
+		return m.getChannelVideosFn(ctx, channelID, token)
 	}
 	return &youtube.Page[youtube.Video]{}, nil
+}
+
+func (m *mockYTClient) GetChannelPlaylists(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Playlist], error) {
+	if m.getChannelPlaylistsFn != nil {
+		return m.getChannelPlaylistsFn(ctx, channelID, token)
+	}
+	return &youtube.Page[youtube.Playlist]{}, nil
+}
+
+func (m *mockYTClient) GetChannelPosts(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Post], error) {
+	if m.getChannelPostsFn != nil {
+		return m.getChannelPostsFn(ctx, channelID, token)
+	}
+	return &youtube.Page[youtube.Post]{}, nil
+}
+
+func (m *mockYTClient) GetPlaylistVideos(ctx context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error) {
+	if m.getPlaylistVideosFn != nil {
+		return m.getPlaylistVideosFn(ctx, playlistID, token)
+	}
+	return &youtube.Page[youtube.Video]{}, nil
+}
+
+func (m *mockYTClient) GetPostComments(ctx context.Context, postID, token string) (*youtube.Page[youtube.Comment], error) {
+	if m.getPostCommentsFn != nil {
+		return m.getPostCommentsFn(ctx, postID, token)
+	}
+	return &youtube.Page[youtube.Comment]{}, nil
 }
 
 // mockMusicClient implements youtube.MusicAPI for testing.
