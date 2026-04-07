@@ -20,6 +20,7 @@ import (
 	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/ui/channel"
 	"github.com/deathmaz/ytui/internal/ui/detail"
+	"github.com/deathmaz/ytui/internal/ui/playlist"
 	"github.com/deathmaz/ytui/internal/ui/feed"
 	"github.com/deathmaz/ytui/internal/ui/picker"
 	"github.com/deathmaz/ytui/internal/ui/search"
@@ -51,8 +52,9 @@ const maxDynamicTabs = 6
 type tabKind int
 
 const (
-	tabVideo   tabKind = iota
+	tabVideo    tabKind = iota
 	tabChannel
+	tabPlaylist
 )
 
 // dynamicTab holds the state for a single dynamic tab (video detail or channel).
@@ -60,9 +62,10 @@ type dynamicTab struct {
 	kind    tabKind
 	id      string // videoID or channelID — used for deduplication
 	title   string
-	detail  detail.Model    // video tab
-	formats []player.Format // cached quality list (video tab only)
-	channel channel.Model   // channel tab
+	detail   detail.Model    // video tab
+	formats  []player.Format // cached quality list (video tab only)
+	channel  channel.Model   // channel tab
+	playlist playlist.Model  // playlist tab
 }
 
 // Model is the root Bubble Tea model.
@@ -271,6 +274,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case subs.ChannelSelectedMsg:
 		return m, m.openChannelTab(msg.Channel)
 
+	case channel.PlaylistSelectedMsg:
+		return m, m.openPlaylistTab(msg.Playlist)
+
 	case formatsLoadedMsg:
 		var formats []player.Format
 		if msg.err != nil {
@@ -375,6 +381,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				tab.detail, cmd = tab.detail.Update(msg)
 			case tabChannel:
 				tab.channel, cmd = tab.channel.Update(msg)
+			case tabPlaylist:
+				tab.playlist, cmd = tab.playlist.Update(msg)
 			}
 			cmds = append(cmds, cmd)
 		}
@@ -422,6 +430,8 @@ func (m *Model) openParsedURL(p *youtube.ParsedURL) tea.Cmd {
 		return m.openVideoTab(&youtube.Video{ID: p.ID})
 	case youtube.URLChannel:
 		return m.openChannelTab(youtube.Channel{ID: p.ID})
+	case youtube.URLPlaylist:
+		return m.openPlaylistTab(youtube.Playlist{ID: p.ID})
 	}
 	return nil
 }
@@ -457,7 +467,7 @@ func (m *Model) openChannelTab(ch youtube.Channel) tea.Cmd {
 		return nil
 	}
 
-	cv := channel.New(m.ytClient, m.listDelegate, m.listThumbList)
+	cv := channel.New(m.ytClient, m.listDelegate, m.listThumbList, m.cfg.Thumbnails)
 	cv.SetSize(m.width, m.contentHeight())
 
 	title := ch.Name
@@ -476,6 +486,34 @@ func (m *Model) openChannelTab(ch youtube.Channel) tea.Cmd {
 	m.tabs.SetActive(idx)
 	m.activeView = ViewDynamicTab
 	return m.tabs.Active().channel.Load(ch)
+}
+
+func (m *Model) openPlaylistTab(pl youtube.Playlist) tea.Cmd {
+	if idx, found := m.tabs.Find(pl.ID); found {
+		m.activeView = ViewDynamicTab
+		m.tabs.SetActive(idx)
+		return nil
+	}
+
+	pv := playlist.New(m.ytClient, m.listDelegate, m.listThumbList)
+	pv.SetSize(m.width, m.contentHeight())
+
+	title := pl.Title
+	if title == "" {
+		title = pl.ID
+	}
+	idx, err := m.tabs.Open(dynamicTab{
+		kind:     tabPlaylist,
+		id:       pl.ID,
+		title:    title,
+		playlist: pv,
+	})
+	if err != nil {
+		return m.setStatus("Max tabs reached (close one with Esc)", 3*time.Second)
+	}
+	m.tabs.SetActive(idx)
+	m.activeView = ViewDynamicTab
+	return m.tabs.Active().playlist.Load(pl)
 }
 
 func (m *Model) openChannelForSelected() tea.Cmd {
@@ -518,6 +556,8 @@ func (m *Model) selectedVideo() *youtube.Video {
 				return tab.detail.Video()
 			case tabChannel:
 				return tab.channel.SelectedVideo()
+			case tabPlaylist:
+				return tab.playlist.SelectedVideo()
 			}
 		}
 	}
@@ -688,6 +728,8 @@ func (m *Model) resizeViews() {
 			tab.detail.SetSize(m.width, ch)
 		case tabChannel:
 			tab.channel.SetSize(m.width, ch)
+		case tabPlaylist:
+			tab.playlist.SetSize(m.width, ch)
 		}
 	}
 }
@@ -719,8 +761,11 @@ func (m *Model) renderTabs() string {
 			title = "..."
 		}
 		prefix := ""
-		if tab.kind == tabChannel {
+		switch tab.kind {
+		case tabChannel:
 			prefix = "@ "
+		case tabPlaylist:
+			prefix = "▶ "
 		}
 		label := fmt.Sprintf("[%d] %s%s", i+4, prefix, shared.Truncate(title, 20-len(prefix)))
 		style := tabStyle
@@ -750,6 +795,8 @@ func (m *Model) renderContent() string {
 				return tab.detail.View()
 			case tabChannel:
 				return tab.channel.View()
+			case tabPlaylist:
+				return tab.playlist.View()
 			}
 		}
 	}

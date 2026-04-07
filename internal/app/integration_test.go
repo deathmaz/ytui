@@ -1117,3 +1117,27 @@ func TestVideoMode_ChannelFromURL(t *testing.T) {
 		t.Errorf("expected ViewDynamicTab, got %d", m.activeView)
 	}
 }
+
+func TestVideoMode_PlaylistFromURL(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getPlaylistVideosFn: func(_ context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "pv1", Title: "PL Video", ChannelName: "Test"},
+				},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	tm.Send(urlinput.SubmitMsg{Parsed: youtube.ParsedURL{Kind: youtube.URLPlaylist, ID: "PLfake_url_pl"}})
+	time.Sleep(500 * time.Millisecond)
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.tabs.Len() != 1 {
+		t.Errorf("expected 1 playlist tab from URL, got %d", m.tabs.Len())
+	}
+	if m.activeView != ViewDynamicTab {
+		t.Errorf("expected ViewDynamicTab, got %d", m.activeView)
+	}
+}

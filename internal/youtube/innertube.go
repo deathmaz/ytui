@@ -763,7 +763,15 @@ func parseGridPlaylistRenderer(gpr gjson.Result) Playlist {
 		VideoCount: gpr.Get("videoCountShortText.simpleText").String(),
 		URL:        PlaylistURL(id),
 	}
-	p.Thumbnails = parseThumbnails(gpr.Get("thumbnail.thumbnails"))
+	// Playlist thumbnails use thumbnailRenderer wrapping, not direct thumbnail
+	thumbs := gpr.Get("thumbnailRenderer.playlistVideoThumbnailRenderer.thumbnail.thumbnails")
+	if !thumbs.Exists() {
+		thumbs = gpr.Get("thumbnailRenderer.playlistCustomThumbnailRenderer.thumbnail.thumbnails")
+	}
+	if !thumbs.Exists() {
+		thumbs = gpr.Get("thumbnail.thumbnails")
+	}
+	p.Thumbnails = parseThumbnails(thumbs)
 	return p
 }
 
@@ -774,14 +782,41 @@ func parseLockupPlaylist(lvm gjson.Result) (Playlist, bool) {
 	}
 	meta := lvm.Get("metadata.lockupMetadataViewModel")
 	p := Playlist{
-		ID:    id,
-		Title: meta.Get("title.content").String(),
-		URL:   PlaylistURL(id),
+		ID:         id,
+		Title:      meta.Get("title.content").String(),
+		Thumbnails: parseLockupThumbnails(lvm),
+		URL:        PlaylistURL(id),
 	}
-	// Video count from metadata
-	p.VideoCount = meta.Get("metadata.contentMetadataViewModel.metadataRows.0.metadataParts.0.text.content").String()
-
+	// Video count is in the thumbnail overlay badge, not metadata
+	lvm.Get("contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays").ForEach(func(_, overlay gjson.Result) bool {
+		overlay.Get("thumbnailOverlayBadgeViewModel.thumbnailBadges").ForEach(func(_, badge gjson.Result) bool {
+			text := badge.Get("thumbnailBadgeViewModel.text").String()
+			if text != "" {
+				p.VideoCount = text
+			}
+			return true
+		})
+		return true
+	})
 	return p, true
+}
+
+// parseLockupThumbnails extracts thumbnails from a lockupViewModel's contentImage.
+// Tries multiple known paths since YouTube uses different structures for
+// videos vs playlists vs collection thumbnails.
+func parseLockupThumbnails(lvm gjson.Result) []Thumbnail {
+	paths := []string{
+		"contentImage.thumbnailViewModel.image.sources",
+		"contentImage.thumbnailViewModel.image.thumbnails",
+		"contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.image.sources",
+		"contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.image.thumbnails",
+	}
+	for _, p := range paths {
+		if thumbs := parseThumbnails(lvm.Get(p)); len(thumbs) > 0 {
+			return thumbs
+		}
+	}
+	return nil
 }
 
 func (c *InnerTubeClient) GetChannelPosts(ctx context.Context, channelID string, pageToken string) (*Page[Post], error) {
@@ -1088,8 +1123,8 @@ func parseLockupViewModel(lvm gjson.Result) Video {
 		return true
 	})
 
-	// Duration from thumbnail overlay badge
 	v.DurationStr = lvm.Get("contentImage.thumbnailViewModel.overlays.0.thumbnailBottomOverlayViewModel.badges.0.thumbnailBadgeViewModel.text").String()
+	v.Thumbnails = parseLockupThumbnails(lvm)
 
 	return v
 }

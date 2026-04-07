@@ -133,17 +133,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		for _, v := range msg.Videos {
 			newItems = append(newItems, shared.VideoItem{Video: v})
 		}
-		if msg.Append {
-			existing := m.list.Items()
-			items := make([]list.Item, len(existing), len(existing)+len(newItems))
-			copy(items, existing)
-			items = append(items, newItems...)
-			cmd := m.list.SetItems(items)
-			cmds = append(cmds, cmd)
-		} else {
-			cmd := m.list.SetItems(newItems)
-			cmds = append(cmds, cmd)
-		}
+		cmds = append(cmds, shared.AppendItems(&m.list, newItems, msg.Append))
 		// Fall through to trigger thumbnail fetches for new items.
 
 	case tea.KeyMsg:

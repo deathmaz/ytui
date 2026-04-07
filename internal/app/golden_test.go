@@ -819,3 +819,164 @@ func TestGolden_Video_Channel_CKey_WithThumbnails(t *testing.T) {
 	sendKey(tm, "c")
 	waitThenCapture(t, tm, "Channel Vid From C Key")
 }
+
+func TestGolden_Video_Channel_Playlists(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_ch_001", Name: "Fake Channel"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cv1", Title: "A Video", ChannelName: "Fake Channel"}},
+			}, nil
+		},
+		getChannelPlaylistsFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Playlist], error) {
+			return &youtube.Page[youtube.Playlist]{
+				Items: []youtube.Playlist{
+					{ID: "PLfake001", Title: "Best Of Compilation", VideoCount: "24"},
+					{ID: "PLfake002", Title: "Tutorials Series", VideoCount: "12"},
+				},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendSpecialKey(tm, tea.KeyTab)
+	waitThenCapture(t, tm, "Best Of Compilation")
+}
+
+func TestGolden_Video_Channel_Playlists_WithThumbnails(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_ch_001", Name: "Fake Channel"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cv1", Title: "A Video", ChannelName: "Fake Channel"}},
+			}, nil
+		},
+		getChannelPlaylistsFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Playlist], error) {
+			return &youtube.Page[youtube.Playlist]{
+				Items: []youtube.Playlist{
+					{ID: "PLfake001", Title: "Best Of Compilation", VideoCount: "24",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/pl1.jpg", Width: 320}}},
+					{ID: "PLfake002", Title: "Tutorials Series", VideoCount: "12",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/pl2.jpg", Width: 320}}},
+				},
+			}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendSpecialKey(tm, tea.KeyTab)
+	waitThenCapture(t, tm, "Best Of Compilation")
+}
+
+func TestGolden_Video_Playlist_Detail(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_ch_001", Name: "Fake Channel"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cv1", Title: "A Video", ChannelName: "Fake Channel"}},
+			}, nil
+		},
+		getChannelPlaylistsFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Playlist], error) {
+			return &youtube.Page[youtube.Playlist]{
+				Items: []youtube.Playlist{
+					{ID: "PLfake001", Title: "Best Of Compilation", VideoCount: "24"},
+				},
+			}, nil
+		},
+		getPlaylistVideosFn: func(_ context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "pv1", Title: "Playlist Video One", ChannelName: "Fake Channel", ViewCount: "5K views", DurationStr: "8:00"},
+					{ID: "pv2", Title: "Playlist Video Two", ChannelName: "Fake Channel", ViewCount: "3K views", DurationStr: "6:30"},
+				},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendSpecialKey(tm, tea.KeyTab)
+	waitForContent(t, tm, "Best Of Compilation")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitThenCapture(t, tm, "Playlist Video One")
+}
+
+func TestGolden_Video_Playlist_Detail_WithThumbnails(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_ch_001", Name: "Fake Channel"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cv1", Title: "A Video", ChannelName: "Fake Channel"}},
+			}, nil
+		},
+		getChannelPlaylistsFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Playlist], error) {
+			return &youtube.Page[youtube.Playlist]{
+				Items: []youtube.Playlist{
+					{ID: "PLfake001", Title: "Best Of Compilation", VideoCount: "24",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/pl1.jpg", Width: 320}}},
+				},
+			}, nil
+		},
+		getPlaylistVideosFn: func(_ context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "pv1", Title: "Playlist Video One", ChannelName: "Fake Channel", ViewCount: "5K views", DurationStr: "8:00",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/pv1.jpg", Width: 320}}},
+					{ID: "pv2", Title: "Playlist Video Two", ChannelName: "Fake Channel", ViewCount: "3K views", DurationStr: "6:30",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/pv2.jpg", Width: 320}}},
+				},
+			}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendSpecialKey(tm, tea.KeyTab)
+	waitForContent(t, tm, "Best Of Compilation")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitThenCapture(t, tm, "Playlist Video One")
+}

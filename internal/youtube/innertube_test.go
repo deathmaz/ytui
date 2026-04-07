@@ -284,8 +284,8 @@ func TestParseChannelPlaylists(t *testing.T) {
 		return false
 	})
 
-	if len(playlists) != 2 {
-		t.Fatalf("expected 2 playlists, got %d", len(playlists))
+	if len(playlists) != 3 {
+		t.Fatalf("expected 3 playlists, got %d", len(playlists))
 	}
 
 	p := playlists[0]
@@ -302,7 +302,25 @@ func TestParseChannelPlaylists(t *testing.T) {
 		t.Errorf("URL = %q", p.URL)
 	}
 	if len(p.Thumbnails) == 0 {
-		t.Error("expected thumbnails")
+		t.Error("expected thumbnails for gridPlaylistRenderer")
+	}
+
+	// lockupViewModel playlist (uses collectionThumbnailViewModel + overlay badge)
+	lp := playlists[2]
+	if lp.ID != "PLfake_playlist_003" {
+		t.Errorf("lockup ID = %q", lp.ID)
+	}
+	if lp.Title != "Lockup Playlist" {
+		t.Errorf("lockup Title = %q", lp.Title)
+	}
+	if lp.VideoCount != "8 videos" {
+		t.Errorf("lockup VideoCount = %q, want %q", lp.VideoCount, "8 videos")
+	}
+	if len(lp.Thumbnails) == 0 {
+		t.Error("expected thumbnails for lockupViewModel playlist")
+	}
+	if lp.Thumbnails[0].URL != "https://i.ytimg.com/vi/fake_pl_lockup/hqdefault.jpg" {
+		t.Errorf("lockup thumb URL = %q", lp.Thumbnails[0].URL)
 	}
 
 	if nextToken != "fake_playlists_continuation_token" {

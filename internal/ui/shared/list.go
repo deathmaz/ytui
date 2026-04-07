@@ -3,6 +3,7 @@ package shared
 import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 )
@@ -18,6 +19,19 @@ func RenderSubTabBar(names []string, activeIdx int) string {
 		labels[i] = s.Render(name)
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, labels...)
+}
+
+// AppendItems sets or appends items on a list model. When shouldAppend is
+// true, new items are added after existing ones; otherwise they replace.
+func AppendItems(l *list.Model, newItems []list.Item, shouldAppend bool) tea.Cmd {
+	if shouldAppend {
+		existing := l.Items()
+		items := make([]list.Item, len(existing), len(existing)+len(newItems))
+		copy(items, existing)
+		items = append(items, newItems...)
+		return l.SetItems(items)
+	}
+	return l.SetItems(newItems)
 }
 
 // ShouldLoadMore returns true when the cursor is within threshold items
