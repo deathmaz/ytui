@@ -384,11 +384,11 @@ func TestParseChannelPosts(t *testing.T) {
 	if p.PublishedAt != "2 days ago" {
 		t.Errorf("PublishedAt = %q", p.PublishedAt)
 	}
-	if p.CommentsToken != "fake_post_comments_token_001" {
-		t.Errorf("CommentsToken = %q", p.CommentsToken)
+	if p.DetailParams != "fake_post_detail_params_001" {
+		t.Errorf("DetailParams = %q", p.DetailParams)
 	}
 	if len(p.Thumbnails) == 0 {
-		t.Error("expected thumbnails for post with image")
+		t.Error("expected thumbnails for post with image (from backstageAttachment)")
 	}
 
 	// Second post has no image

@@ -21,6 +21,7 @@ import (
 	"github.com/deathmaz/ytui/internal/ui/channel"
 	"github.com/deathmaz/ytui/internal/ui/detail"
 	"github.com/deathmaz/ytui/internal/ui/playlist"
+	"github.com/deathmaz/ytui/internal/ui/post"
 	"github.com/deathmaz/ytui/internal/ui/feed"
 	"github.com/deathmaz/ytui/internal/ui/picker"
 	"github.com/deathmaz/ytui/internal/ui/search"
@@ -55,6 +56,7 @@ const (
 	tabVideo    tabKind = iota
 	tabChannel
 	tabPlaylist
+	tabPost
 )
 
 // dynamicTab holds the state for a single dynamic tab (video detail or channel).
@@ -66,6 +68,7 @@ type dynamicTab struct {
 	formats  []player.Format // cached quality list (video tab only)
 	channel  channel.Model   // channel tab
 	playlist playlist.Model  // playlist tab
+	post     post.Model      // post tab
 }
 
 // Model is the root Bubble Tea model.
@@ -277,6 +280,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case channel.PlaylistSelectedMsg:
 		return m, m.openPlaylistTab(msg.Playlist)
 
+	case channel.PostSelectedMsg:
+		return m, m.openPostTab(msg.Post)
+
 	case formatsLoadedMsg:
 		var formats []player.Format
 		if msg.err != nil {
@@ -383,6 +389,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				tab.channel, cmd = tab.channel.Update(msg)
 			case tabPlaylist:
 				tab.playlist, cmd = tab.playlist.Update(msg)
+			case tabPost:
+				tab.post, cmd = tab.post.Update(msg)
 			}
 			cmds = append(cmds, cmd)
 		}
@@ -514,6 +522,34 @@ func (m *Model) openPlaylistTab(pl youtube.Playlist) tea.Cmd {
 	m.tabs.SetActive(idx)
 	m.activeView = ViewDynamicTab
 	return m.tabs.Active().playlist.Load(pl)
+}
+
+func (m *Model) openPostTab(p youtube.Post) tea.Cmd {
+	if idx, found := m.tabs.Find(p.ID); found {
+		m.activeView = ViewDynamicTab
+		m.tabs.SetActive(idx)
+		return nil
+	}
+
+	pv := post.New(m.ytClient, m.imgR)
+	pv.SetSize(m.width, m.contentHeight())
+
+	title := shared.Truncate(p.Content, 30)
+	if title == "" {
+		title = p.ID
+	}
+	idx, err := m.tabs.Open(dynamicTab{
+		kind:  tabPost,
+		id:    p.ID,
+		title: title,
+		post:  pv,
+	})
+	if err != nil {
+		return m.setStatus("Max tabs reached (close one with Esc)", 3*time.Second)
+	}
+	m.tabs.SetActive(idx)
+	m.activeView = ViewDynamicTab
+	return m.tabs.Active().post.Load(p)
 }
 
 func (m *Model) openChannelForSelected() tea.Cmd {
@@ -730,6 +766,8 @@ func (m *Model) resizeViews() {
 			tab.channel.SetSize(m.width, ch)
 		case tabPlaylist:
 			tab.playlist.SetSize(m.width, ch)
+		case tabPost:
+			tab.post.SetSize(m.width, ch)
 		}
 	}
 }
@@ -766,6 +804,8 @@ func (m *Model) renderTabs() string {
 			prefix = "@ "
 		case tabPlaylist:
 			prefix = "▶ "
+		case tabPost:
+			prefix = "✎ "
 		}
 		label := fmt.Sprintf("[%d] %s%s", i+4, prefix, shared.Truncate(title, 20-len(prefix)))
 		style := tabStyle
@@ -797,6 +837,8 @@ func (m *Model) renderContent() string {
 				return tab.channel.View()
 			case tabPlaylist:
 				return tab.playlist.View()
+			case tabPost:
+				return tab.post.View()
 			}
 		}
 	}

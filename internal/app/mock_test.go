@@ -117,9 +117,9 @@ func (m *mockYTClient) GetPlaylistVideos(ctx context.Context, playlistID, token 
 	return &youtube.Page[youtube.Video]{}, nil
 }
 
-func (m *mockYTClient) GetPostComments(ctx context.Context, postID, token string) (*youtube.Page[youtube.Comment], error) {
+func (m *mockYTClient) GetPostComments(ctx context.Context, detailParams, token string) (*youtube.Page[youtube.Comment], error) {
 	if m.getPostCommentsFn != nil {
-		return m.getPostCommentsFn(ctx, postID, token)
+		return m.getPostCommentsFn(ctx, detailParams, token)
 	}
 	return &youtube.Page[youtube.Comment]{}, nil
 }

@@ -54,14 +54,14 @@ type Playlist struct {
 
 // Post represents a YouTube community post.
 type Post struct {
-	ID            string
-	AuthorName    string
-	AuthorID      string
-	Content       string
-	LikeCount     string
-	PublishedAt   string
-	Thumbnails    []Thumbnail
-	CommentsToken string
+	ID           string
+	AuthorName   string
+	AuthorID     string
+	Content      string
+	LikeCount    string
+	PublishedAt  string
+	Thumbnails   []Thumbnail
+	DetailParams string // browseEndpoint params for FEpost_detail (to fetch comments)
 }
 
 // Thumbnail holds image URL and dimensions.

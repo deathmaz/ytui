@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/deathmaz/ytui/internal/ui/comments"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
@@ -19,19 +20,8 @@ import (
 
 var (
 	separatorStyle = styles.Dim
-	authorStyle    = styles.Accent.Bold(true)
-	ownerStyle     = styles.SelectedTitle.Bold(true)
-	timeStyle      = styles.Dim
 	contentStyle   = styles.Subtitle
-	likesStyle     = styles.Dim
 
-	loadMoreKey = key.NewBinding(key.WithKeys("L"))
-	expandKey   = key.NewBinding(key.WithKeys("l"))
-	collapseKey = key.NewBinding(key.WithKeys("h"))
-	upKey       = key.NewBinding(key.WithKeys("k", "up"))
-	downKey     = key.NewBinding(key.WithKeys("j", "down"))
-	pageDownKey = key.NewBinding(key.WithKeys("ctrl+d", "ctrl+f", "pgdown"))
-	pageUpKey   = key.NewBinding(key.WithKeys("ctrl+u", "ctrl+b", "pgup"))
 	goTopKey    = key.NewBinding(key.WithKeys("g", "home"))
 	goBottomKey = key.NewBinding(key.WithKeys("G", "end"))
 )
@@ -52,58 +42,36 @@ type VideoLoadedMsg struct {
 
 type clearTransmitMsg struct{}
 
-type commentsLoadedMsg struct {
-	Comments  []youtube.Comment
-	NextToken string
-	Err       error
-}
-
-type repliesLoadedMsg struct {
-	CommentID string
-	Replies   []youtube.Comment
-	NextToken string
-	Err       error
-}
-
-type commentThread struct {
-	comment        youtube.Comment
-	replies        []youtube.Comment
-	expanded       bool
-	loading        bool
-	replyNextToken string
-}
-
 // Model is the video detail view with Info and Comments sub-tabs.
 type Model struct {
-	activeTab        int // 0=Info, 1=Comments
-	infoViewport     viewport.Model
-	commentsViewport viewport.Model
-	spinner          spinner.Model
-	video            *youtube.Video
-	loading          bool
-	width            int
-	height           int
-	client           youtube.Client
-	imgR             *ytimage.Renderer
-	thumbTransmit    string
-	thumbPlace       string
-	thumbPending     bool
-	thumbFailed      bool
-
-	// Comments
-	threads         []commentThread
-	commentsToken   string
-	commentsLoading bool
-	commentCursor   int // index into threads (+ expanded replies)
-	cursorLine      int // line number of cursor in rendered comments
+	activeTab    int // 0=Info, 1=Comments
+	infoViewport viewport.Model
+	comments     comments.Model
+	spinner      spinner.Model
+	video        *youtube.Video
+	loading      bool
+	width        int
+	height       int
+	client       youtube.Client
+	imgR         *ytimage.Renderer
+	thumbTransmit string
+	thumbPlace    string
+	thumbPending  bool
+	thumbFailed   bool
 }
 
 // New creates a new detail view model.
 func New(client youtube.Client, imgR *ytimage.Renderer) Model {
+	cm := comments.New("video", func(ctx context.Context, token string) (*youtube.Page[youtube.Comment], error) {
+		return client.GetComments(ctx, "", token)
+	}, func(ctx context.Context, commentID, token string) (*youtube.Page[youtube.Comment], error) {
+		return client.GetReplies(ctx, commentID, token)
+	})
 	return Model{
-		spinner: styles.NewSpinner(),
-		client:  client,
-		imgR:    imgR,
+		spinner:  styles.NewSpinner(),
+		comments: cm,
+		client:   client,
+		imgR:     imgR,
 	}
 }
 
@@ -124,14 +92,9 @@ func (m *Model) SetSize(w, h int) {
 	vh := m.viewportHeight()
 	m.infoViewport.Width = w
 	m.infoViewport.Height = vh
-	m.commentsViewport.Width = w
-	m.commentsViewport.Height = vh
-	if m.video != nil {
-		if m.activeTab == tabInfo {
-			m.infoViewport.SetContent(m.renderInfo())
-		} else {
-			m.commentsViewport.SetContent(m.renderComments())
-		}
+	m.comments.SetSize(w, vh)
+	if m.video != nil && m.activeTab == tabInfo {
+		m.infoViewport.SetContent(m.renderInfo())
 	}
 }
 
@@ -144,10 +107,6 @@ func (m *Model) LoadVideo(id string) tea.Cmd {
 	m.thumbPlace = ""
 	m.thumbPending = false
 	m.thumbFailed = false
-	m.threads = nil
-	m.commentsToken = ""
-	m.commentsLoading = false
-	m.commentCursor = 0
 	client := m.client
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
 		v, err := client.GetVideo(context.Background(), id)
@@ -176,8 +135,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.video = msg.Video
 		m.infoViewport = viewport.New(m.width, vh)
 		m.infoViewport.KeyMap = viewportKeyMap()
-		m.commentsViewport = viewport.New(m.width, vh)
-		m.commentsViewport.KeyMap = viewportKeyMap()
 
 		// Start thumbnail fetch
 		if m.imgR != nil {
@@ -197,17 +154,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		// Auto-fetch comments
 		if m.video.CommentsToken != "" {
-			m.commentsToken = m.video.CommentsToken
-			m.commentsLoading = true
-			token := m.commentsToken
-			client := m.client
-			cmds = append(cmds, func() tea.Msg {
-				page, err := client.GetComments(context.Background(), "", token)
-				if err != nil {
-					return commentsLoadedMsg{Err: err}
-				}
-				return commentsLoadedMsg{Comments: page.Items, NextToken: page.NextToken}
-			})
+			cmds = append(cmds, m.comments.Load(m.video.CommentsToken))
 		}
 
 		m.infoViewport.SetContent(m.renderInfo())
@@ -235,35 +182,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.thumbTransmit = ""
 		return m, nil
 
-	case commentsLoadedMsg:
-		m.commentsLoading = false
-		if msg.Err == nil {
-			for _, c := range msg.Comments {
-				m.threads = append(m.threads, commentThread{comment: c})
-			}
-			m.commentsToken = msg.NextToken
-		}
-		if m.video != nil {
-			m.commentsViewport.SetContent(m.renderComments())
-		}
-		return m, nil
-
-	case repliesLoadedMsg:
-		for i := range m.threads {
-			if m.threads[i].comment.ID == msg.CommentID {
-				m.threads[i].loading = false
-				if msg.Err == nil {
-					m.threads[i].replies = append(m.threads[i].replies, msg.Replies...)
-					m.threads[i].replyNextToken = msg.NextToken
-					m.threads[i].expanded = true
-				}
-				break
-			}
-		}
-		if m.video != nil {
-			m.commentsViewport.SetContent(m.renderComments())
-		}
-		return m, nil
+	case comments.LoadedMsg, comments.RepliesLoadedMsg:
+		var cmd tea.Cmd
+		m.comments, cmd = m.comments.Update(msg)
+		return m, cmd
 
 	case tea.KeyMsg:
 		if !m.loading {
@@ -295,43 +217,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					cmds = append(cmds, cmd)
 				}
 			} else {
-				// Comments tab — cursor navigation always active
-				switch {
-				case key.Matches(msg, downKey):
-					m.moveCommentCursor(1)
-					return m, m.autoLoadComments()
-				case key.Matches(msg, upKey):
-					m.moveCommentCursor(-1)
-					return m, nil
-				case key.Matches(msg, pageDownKey):
-					m.moveCommentCursor(5)
-					return m, m.autoLoadComments()
-				case key.Matches(msg, pageUpKey):
-					m.moveCommentCursor(-5)
-					return m, nil
-				case key.Matches(msg, goTopKey):
-					m.moveCommentCursor(-m.totalCommentItems())
-					return m, nil
-				case key.Matches(msg, goBottomKey):
-					m.moveCommentCursor(m.totalCommentItems())
-					return m, m.autoLoadComments()
-				case key.Matches(msg, expandKey):
-					return m, m.expandAtCursor()
-				case key.Matches(msg, collapseKey):
-					m.collapseAtCursor()
-					return m, nil
-				case key.Matches(msg, loadMoreKey):
-					return m, m.loadMoreComments()
-				}
+				var cmd tea.Cmd
+				m.comments, cmd = m.comments.Update(msg)
+				return m, cmd
 			}
 		}
 
 	case spinner.TickMsg:
-		if m.loading || m.commentsLoading {
+		if m.loading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
 		}
+		// Forward to comments for its own spinner
+		var cmd tea.Cmd
+		m.comments, cmd = m.comments.Update(msg)
+		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -359,7 +260,7 @@ func (m Model) View() string {
 	if m.activeTab == tabInfo {
 		content = m.infoViewport.View()
 	} else {
-		content = m.commentsViewport.View()
+		content = m.comments.View()
 	}
 
 	view := lipgloss.JoinVertical(lipgloss.Left, subBar, content)
@@ -369,152 +270,6 @@ func (m Model) View() string {
 	return view
 }
 
-func (m *Model) loadMoreComments() tea.Cmd {
-	if m.commentsLoading || m.commentsToken == "" {
-		return nil
-	}
-	m.commentsLoading = true
-	token := m.commentsToken
-	client := m.client
-	return func() tea.Msg {
-		page, err := client.GetComments(context.Background(), "", token)
-		if err != nil {
-			return commentsLoadedMsg{Err: err}
-		}
-		return commentsLoadedMsg{Comments: page.Items, NextToken: page.NextToken}
-	}
-}
-
-func (m *Model) cursorThreadIndex() int {
-	pos := 0
-	for i, t := range m.threads {
-		threadEnd := pos + 1
-		if t.expanded {
-			threadEnd += len(t.replies)
-		}
-		if m.commentCursor >= pos && m.commentCursor < threadEnd {
-			return i
-		}
-		pos = threadEnd
-	}
-	return -1
-}
-
-func (m *Model) autoLoadComments() tea.Cmd {
-	total := m.totalCommentItems()
-	if total > 0 && m.commentCursor >= total-5 {
-		return m.loadMoreComments()
-	}
-	return nil
-}
-
-func (m *Model) totalCommentItems() int {
-	n := 0
-	for _, t := range m.threads {
-		n++
-		if t.expanded {
-			n += len(t.replies)
-		}
-	}
-	return n
-}
-
-func (m *Model) moveCommentCursor(delta int) {
-	m.commentCursor += delta
-	max := m.totalCommentItems() - 1
-	if max < 0 {
-		max = 0
-	}
-	if m.commentCursor > max {
-		m.commentCursor = max
-	}
-	if m.commentCursor < 0 {
-		m.commentCursor = 0
-	}
-	m.commentsViewport.SetContent(m.renderComments())
-	m.scrollToCommentCursor()
-}
-
-func (m *Model) expandAtCursor() tea.Cmd {
-	idx := m.cursorThreadIndex()
-	if idx < 0 || idx >= len(m.threads) {
-		return nil
-	}
-	t := &m.threads[idx]
-
-	if t.comment.ReplyCount == 0 && t.comment.ReplyToken == "" {
-		return nil
-	}
-	if t.expanded {
-		if t.replyNextToken == "" {
-			return nil
-		}
-		return m.loadRepliesCmd(t)
-	}
-	if len(t.replies) > 0 {
-		t.expanded = true
-		m.commentsViewport.SetContent(m.renderComments())
-		return nil
-	}
-	if t.comment.ReplyToken == "" {
-		return nil
-	}
-	return m.loadRepliesCmd(t)
-}
-
-func (m *Model) collapseAtCursor() {
-	idx := m.cursorThreadIndex()
-	if idx < 0 || idx >= len(m.threads) {
-		return
-	}
-	t := &m.threads[idx]
-	if t.expanded {
-		pos := 0
-		for i := 0; i < idx; i++ {
-			pos++
-			if m.threads[i].expanded {
-				pos += len(m.threads[i].replies)
-			}
-		}
-		m.commentCursor = pos
-		t.expanded = false
-		m.commentsViewport.SetContent(m.renderComments())
-		m.scrollToCommentCursor()
-	}
-}
-
-func (m *Model) loadRepliesCmd(t *commentThread) tea.Cmd {
-	t.loading = true
-	m.commentsViewport.SetContent(m.renderComments())
-
-	token := t.replyNextToken
-	if token == "" {
-		token = t.comment.ReplyToken
-	}
-	commentID := t.comment.ID
-	client := m.client
-	return func() tea.Msg {
-		page, err := client.GetReplies(context.Background(), commentID, token)
-		if err != nil {
-			return repliesLoadedMsg{CommentID: commentID, Err: err}
-		}
-		return repliesLoadedMsg{
-			CommentID: commentID,
-			Replies:   page.Items,
-			NextToken: page.NextToken,
-		}
-	}
-}
-
-func (m *Model) scrollToCommentCursor() {
-	yOff := m.commentsViewport.YOffset
-	vh := m.viewportHeight()
-	if m.cursorLine < yOff {
-		m.commentsViewport.SetYOffset(m.cursorLine)
-	} else if m.cursorLine >= yOff+vh-2 {
-		m.commentsViewport.SetYOffset(m.cursorLine - vh/3)
-	}
-}
 
 // renderInfo renders the Info tab content.
 func (m *Model) renderInfo() string {
@@ -580,136 +335,6 @@ func (m *Model) renderInfo() string {
 	b.WriteString("\n")
 	b.WriteString(styles.Dim.Render("[p] play  [d] download  [o] open in browser  [y] copy URL  [tab] comments  [esc] back"))
 
-	return b.String()
-}
-
-// renderComments renders the Comments tab content.
-func (m *Model) renderComments() string {
-	var b strings.Builder
-	lineNum := 0
-	countLines := func(s string) int { return strings.Count(s, "\n") }
-
-	if m.commentsLoading && len(m.threads) == 0 {
-		b.WriteString(m.spinner.View() + " Loading comments...")
-		return b.String()
-	}
-	if len(m.threads) == 0 {
-		b.WriteString(styles.Dim.Render("No comments"))
-		return b.String()
-	}
-
-	pos := 0
-	for i, t := range m.threads {
-		if i > 0 {
-			b.WriteString("\n")
-			lineNum++
-		}
-		selected := pos == m.commentCursor
-		if selected {
-			m.cursorLine = lineNum
-		}
-		chunk := m.renderCommentStr(t.comment, false, selected)
-		b.WriteString(chunk)
-		lineNum += countLines(chunk)
-		pos++
-
-		if t.comment.ReplyCount > 0 && !t.expanded {
-			if t.loading {
-				b.WriteString("  " + m.spinner.View() + " Loading replies...\n")
-			} else {
-				indicator := fmt.Sprintf("  ▸ %d replies [l to expand]", t.comment.ReplyCount)
-				if selected {
-					b.WriteString(styles.Accent.Render(indicator))
-				} else {
-					b.WriteString(styles.Dim.Render(indicator))
-				}
-				b.WriteString("\n")
-			}
-			lineNum++
-		}
-
-		if t.expanded {
-			for _, r := range t.replies {
-				replySelected := pos == m.commentCursor
-				if replySelected {
-					m.cursorLine = lineNum
-				}
-				chunk := m.renderCommentStr(r, true, replySelected)
-				b.WriteString(chunk)
-				lineNum += countLines(chunk)
-				pos++
-			}
-			if t.loading {
-				b.WriteString("      " + m.spinner.View() + " Loading replies...\n")
-				lineNum++
-			}
-			if t.replyNextToken != "" {
-				b.WriteString("      ")
-				b.WriteString(styles.Accent.Render("▸ more replies [l]"))
-				b.WriteString("\n")
-				lineNum++
-			}
-			b.WriteString("      ")
-			b.WriteString(styles.Dim.Render("▾ [h] collapse"))
-			b.WriteString("\n")
-			lineNum++
-		}
-	}
-
-	if m.commentsToken != "" {
-		b.WriteString("\n")
-		b.WriteString(styles.Dim.Render("Press L to load more comments"))
-	}
-
-	b.WriteString("\n\n")
-	b.WriteString(styles.Dim.Render("[j/k] navigate  [l] expand  [h] collapse  [L] load more  [shift+tab] info  [esc] back"))
-
-	return b.String()
-}
-
-func (m *Model) renderCommentStr(c youtube.Comment, isReply bool, selected bool) string {
-	var b strings.Builder
-	indent := ""
-	if isReply {
-		indent = "    "
-	}
-
-	cursor := "  "
-	if selected {
-		cursor = "> "
-	}
-
-	aStyle := authorStyle
-	if c.IsOwner {
-		aStyle = ownerStyle
-	}
-	b.WriteString(indent)
-	b.WriteString(cursor)
-	b.WriteString(aStyle.Render(c.AuthorName))
-	b.WriteString("  ")
-	b.WriteString(timeStyle.Render(c.PublishedAt))
-	b.WriteString("\n")
-
-	contentWidth := m.width - len(indent) - 4
-	if contentWidth < 20 {
-		contentWidth = 20
-	}
-	content := contentStyle.Width(contentWidth).Render(c.Content)
-	for _, line := range strings.Split(content, "\n") {
-		b.WriteString(indent)
-		b.WriteString("    ")
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-
-	likes := strings.TrimSpace(c.LikeCount)
-	if likes == "" {
-		likes = "0"
-	}
-	b.WriteString(indent)
-	b.WriteString("    ")
-	b.WriteString(likesStyle.Render("👍 " + likes))
-	b.WriteString("\n")
 	return b.String()
 }
 

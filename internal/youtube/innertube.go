@@ -575,7 +575,7 @@ func parseFeedItems(contents gjson.Result, videos *[]Video, nextToken *string) {
 const (
 	channelVideosParams    = "EgZ2aWRlb3PyBgQKAjoA"
 	channelPlaylistsParams = "EglwbGF5bGlzdHPyBgQKAkIA"
-	channelPostsParams     = "Egljb21tdW5pdHnyBgQKAhgB"
+	channelPostsParams     = "EgVwb3N0c_IGBAoCSgA="
 )
 
 // browseChannelTab calls Browse for a channel tab. On initial load it sends
@@ -891,14 +891,23 @@ func parseBackstagePost(bpr gjson.Result) Post {
 	})
 
 	p := Post{
-		ID:            bpr.Get("postId").String(),
-		AuthorName:    bpr.Get("authorText.runs.0.text").String(),
-		AuthorID:      bpr.Get("authorEndpoint.browseEndpoint.browseId").String(),
-		Content:       b.String(),
-		LikeCount:     bpr.Get("voteCount.simpleText").String(),
-		PublishedAt:   bpr.Get("publishedTimeText.runs.0.text").String(),
-		CommentsToken: bpr.Get("actionButtons.commentActionButtonsRenderer.replyButton.buttonRenderer.navigationEndpoint.continuationCommand.token").String(),
-		Thumbnails:    parseThumbnails(bpr.Get("backstageImageRenderer.image.thumbnails")),
+		ID:         bpr.Get("postId").String(),
+		AuthorName: bpr.Get("authorText.runs.0.text").String(),
+		AuthorID:   bpr.Get("authorEndpoint.browseEndpoint.browseId").String(),
+		Content:    b.String(),
+		LikeCount:  bpr.Get("voteCount.simpleText").String(),
+		PublishedAt: bpr.Get("publishedTimeText.runs.0.text").String(),
+	}
+
+	// Comments are accessed via browseEndpoint (FEpost_detail), not continuationCommand
+	p.DetailParams = bpr.Get("actionButtons.commentActionButtonsRenderer.replyButton.buttonRenderer.navigationEndpoint.browseEndpoint.params").String()
+
+	// Image from backstageAttachment (single image or first of multi-image)
+	att := bpr.Get("backstageAttachment")
+	if thumbs := att.Get("backstageImageRenderer.image.thumbnails"); thumbs.Exists() {
+		p.Thumbnails = parseThumbnails(thumbs)
+	} else if thumbs := att.Get("postMultiImageRenderer.images.0.backstageImageRenderer.image.thumbnails"); thumbs.Exists() {
+		p.Thumbnails = parseThumbnails(thumbs)
 	}
 
 	return p
@@ -992,16 +1001,64 @@ func parsePlaylistVideoRenderer(pvr gjson.Result) Video {
 	return v
 }
 
-func (c *InnerTubeClient) GetPostComments(ctx context.Context, postID string, pageToken string) (*Page[Comment], error) {
-	if pageToken == "" {
+// GetPostComments fetches comments for a community post.
+// On initial call, detailParams should be the Post.DetailParams value and
+// pageToken should be empty. On continuation, pass the NextToken from the
+// previous page as pageToken (detailParams is ignored).
+func (c *InnerTubeClient) GetPostComments(ctx context.Context, detailParams string, pageToken string) (*Page[Comment], error) {
+	if pageToken != "" {
+		// Continuation: browse with the continuation token directly
+		raw, err := c.it.Browse(ctx, nil, nil, &pageToken)
+		if err != nil {
+			return nil, fmt.Errorf("innertube post comments continuation: %w", err)
+		}
+		return parsePostCommentsResponse(raw)
+	}
+	if detailParams == "" {
 		return &Page[Comment]{}, nil
 	}
-	raw, err := c.it.Next(ctx, nil, nil, nil, nil, &pageToken)
+	// Initial: browse FEpost_detail to get the comment continuation token
+	browseID := "FEpost_detail"
+	raw, err := c.it.Browse(ctx, &browseID, &detailParams, nil)
+	if err != nil {
+		return nil, fmt.Errorf("innertube post detail: %w", err)
+	}
+	data, err := toGJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	// Extract continuation token from the second section
+	var commentToken string
+	data.Get("contents.twoColumnBrowseResultsRenderer.tabs").ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		tr.Get("content.sectionListRenderer.contents").ForEach(func(_, section gjson.Result) bool {
+			section.Get("itemSectionRenderer.contents").ForEach(func(_, item gjson.Result) bool {
+				token := item.Get("continuationItemRenderer.continuationEndpoint.continuationCommand.token")
+				if token.Exists() {
+					commentToken = token.String()
+				}
+				return true
+			})
+			return true
+		})
+		return false
+	})
+	if commentToken == "" {
+		return &Page[Comment]{}, nil
+	}
+	// Fetch comments using the extracted token
+	raw2, err := c.it.Browse(ctx, nil, nil, &commentToken)
 	if err != nil {
 		return nil, fmt.Errorf("innertube post comments: %w", err)
 	}
-	return parseCommentsResponse(raw)
+	return parsePostCommentsResponse(raw2)
 }
+
+// Post comments use the same response format as video comments.
+var parsePostCommentsResponse = parseCommentsResponse
 
 func (c *InnerTubeClient) IsAuthenticated() bool {
 	return c.authenticated

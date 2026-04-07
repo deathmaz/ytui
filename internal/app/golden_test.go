@@ -980,3 +980,96 @@ func TestGolden_Video_Playlist_Detail_WithThumbnails(t *testing.T) {
 	sendSpecialKey(tm, tea.KeyEnter)
 	waitThenCapture(t, tm, "Playlist Video One")
 }
+
+func newPostTestClient() *mockYTClient {
+	return &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_post_ch", Name: "Fake Gaming Channel", Handle: "@FakeGaming"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "cv1", Title: "Ranked Ladder Session", ChannelName: "Fake Gaming Channel", DurationStr: "45:30"},
+				},
+			}, nil
+		},
+		getChannelPostsFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Post], error) {
+			return &youtube.Page[youtube.Post]{
+				Items: []youtube.Post{
+					{ID: "fake_post_001", AuthorName: "Fake Gaming Channel", Content: "Who wants to see more challenge runs on our channel?\nNew adventures of the creative player number one coming soon!", LikeCount: "113", PublishedAt: "3 months ago", DetailParams: "fake_dp1"},
+					{ID: "fake_post_002", AuthorName: "Fake Gaming Channel", Content: "Short documentary about the impact of global events on gaming\n- including my occasional appearances and commentary throughout", LikeCount: "61", PublishedAt: "4 months ago", DetailParams: "fake_dp2"},
+					{ID: "fake_post_003", AuthorName: "Fake Gaming Channel", Content: "The new balance patch is officially out!\nWhat are your impressions?\nLink with description of all changes in comments below", LikeCount: "96", PublishedAt: "6 months ago", DetailParams: "fake_dp3"},
+					{ID: "fake_post_004", AuthorName: "Fake Gaming Channel", Content: "Time to summarize our charity project, implemented together with a local community foundation for the arts", LikeCount: "431", PublishedAt: "7 months ago", DetailParams: "fake_dp4",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/charity_post.jpg", Width: 400, Height: 400}}},
+					{ID: "fake_post_005", AuthorName: "Fake Gaming Channel", Content: "Your vote can determine the program of our channel for the next couple of months! Cast your vote right now in the poll", LikeCount: "109", PublishedAt: "8 months ago", DetailParams: "fake_dp5"},
+					{ID: "fake_post_006", AuthorName: "Fake Gaming Channel", Content: "You wanted a continuation of the first-person challenge in grandmaster league? Welcome to our charity mini-tournament event!", LikeCount: "254", PublishedAt: "9 months ago", DetailParams: "fake_dp6",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/challenge_post.jpg", Width: 400, Height: 400}}},
+					{ID: "fake_post_007", AuthorName: "Fake Gaming Channel", Content: "Are you ready for the new episode? Wednesday at 5pm - Video number 2100 on our channel: enjoy the show like never before!", LikeCount: "263", PublishedAt: "9 months ago", DetailParams: "fake_dp7",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/episode_post.jpg", Width: 400, Height: 400}}},
+					{ID: "fake_post_008", AuthorName: "Fake Gaming Channel", Content: "What about the annual event streams this year? The yearly broadcasts have become a nice tradition for part of our community", LikeCount: "106", PublishedAt: "10 months ago", DetailParams: "fake_dp8",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/annual_post.jpg", Width: 400, Height: 400}}},
+				},
+			}, nil
+		},
+		getPostCommentsFn: func(_ context.Context, detailParams, token string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{
+				Items: []youtube.Comment{
+					{ID: "fake_c1", AuthorName: "FakeUser42", Content: "More challenge runs please! The content is always great, thanks for the regular uploads on the channel!", LikeCount: "45", PublishedAt: "3 months ago", ReplyCount: 5, ReplyToken: "fake_reply1"},
+					{ID: "fake_c2", AuthorName: "FakeGamer99", Content: "When will there be a new tournament? Really looking forward to the next season!", LikeCount: "23", PublishedAt: "3 months ago", ReplyCount: 2, ReplyToken: "fake_reply2"},
+					{ID: "fake_c3", AuthorName: "FakeViewer01", Content: "Best gaming channel on YouTube! I watch every single day without fail!", LikeCount: "67", PublishedAt: "2 months ago"},
+					{ID: "fake_c4", AuthorName: "FakeAnalyst", Content: "When will you review the new patch? There are many interesting changes for all the different playstyles", LikeCount: "34", PublishedAt: "2 months ago", ReplyCount: 1, ReplyToken: "fake_reply3"},
+					{ID: "fake_c5", AuthorName: "FakeCasual", Content: "Thanks for the charity project! Really important work for the community.", LikeCount: "89", PublishedAt: "1 month ago"},
+					{ID: "fake_c6", AuthorName: "FakeWatcher", Content: "Come to the next tournament! We will be cheering for you all the way!", LikeCount: "12", PublishedAt: "1 month ago"},
+				},
+				NextToken: "fake_comments_next_page",
+			}, nil
+		},
+	}
+}
+
+func TestGolden_Video_Channel_Posts(t *testing.T) {
+	tm := newTestVideoProgram(t, newPostTestClient())
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Gaming Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Ranked Ladder Session")
+	sendSpecialKey(tm, tea.KeyTab) // playlists
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab) // posts
+	waitThenCapture(t, tm, "challenge runs")
+}
+
+func TestGolden_Video_Post_Detail_Content(t *testing.T) {
+	tm := newTestVideoProgram(t, newPostTestClient())
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Gaming Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Ranked Ladder Session")
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	waitForContent(t, tm, "challenge runs")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitThenCapture(t, tm, "creative player")
+}
+
+func TestGolden_Video_Post_Detail_Comments(t *testing.T) {
+	tm := newTestVideoProgram(t, newPostTestClient())
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Gaming Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Ranked Ladder Session")
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	waitForContent(t, tm, "challenge runs")
+	sendSpecialKey(tm, tea.KeyEnter)
+	time.Sleep(300 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab) // switch to comments
+	waitThenCapture(t, tm, "FakeUser42")
+}

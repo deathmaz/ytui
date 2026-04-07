@@ -35,7 +35,9 @@ type Client interface {
 	GetPlaylistVideos(ctx context.Context, playlistID string, pageToken string) (*Page[Video], error)
 
 	// GetPostComments returns comments on a community post.
-	GetPostComments(ctx context.Context, postID string, pageToken string) (*Page[Comment], error)
+	// On initial call, pass detailParams (from Post.DetailParams) with empty pageToken.
+	// On continuation, pass the NextToken as pageToken (detailParams is ignored).
+	GetPostComments(ctx context.Context, detailParams string, pageToken string) (*Page[Comment], error)
 
 	// IsAuthenticated reports whether the client has valid credentials.
 	IsAuthenticated() bool

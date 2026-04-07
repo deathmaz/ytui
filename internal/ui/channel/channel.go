@@ -47,9 +47,23 @@ type PlaylistsLoadedMsg struct {
 	Err       error
 }
 
+// PostsLoadedMsg carries channel post results.
+type PostsLoadedMsg struct {
+	ChannelID string
+	Posts     []youtube.Post
+	NextToken string
+	Append    bool
+	Err       error
+}
+
 // PlaylistSelectedMsg is emitted when a user selects a playlist.
 type PlaylistSelectedMsg struct {
 	Playlist youtube.Playlist
+}
+
+// PostSelectedMsg is emitted when a user selects a post.
+type PostSelectedMsg struct {
+	Post youtube.Post
 }
 
 // Model is the channel detail view with Videos/Playlists/Posts sub-tabs.
@@ -71,6 +85,12 @@ type Model struct {
 	playlistLoaded   bool
 	playlistLoadMore bool
 
+	postList     list.Model
+	postToken    string
+	postLoading  bool
+	postLoaded   bool
+	postLoadMore bool
+
 	spinner spinner.Model
 	client  youtube.Client
 	width   int
@@ -88,6 +108,7 @@ func New(client youtube.Client, videoDelegate list.ItemDelegate, thumbList *shar
 		thumbList:    thumbList,
 		playlistList: shared.NewList(plDelegate),
 		plThumbList:  plThumb,
+		postList:     shared.NewList(shared.PostDelegate{}),
 		spinner:      styles.NewSpinner(),
 		client:       client,
 	}
@@ -127,6 +148,7 @@ func (m *Model) SetSize(w, h int) {
 	}
 	m.videoList.SetSize(w, listH)
 	m.playlistList.SetSize(w, listH)
+	m.postList.SetSize(w, listH)
 }
 
 // SelectedVideo returns the currently selected video, if any.
@@ -149,6 +171,8 @@ func (m *Model) Load(ch youtube.Channel) tea.Cmd {
 	m.videoToken = ""
 	m.playlistLoaded = false
 	m.playlistToken = ""
+	m.postLoaded = false
+	m.postToken = ""
 
 	client := m.client
 	channelID := ch.ID
@@ -229,6 +253,48 @@ func (m *Model) loadMorePlaylists() tea.Cmd {
 	}
 }
 
+func (m *Model) loadPosts() tea.Cmd {
+	if m.postLoading || m.postLoaded {
+		return nil
+	}
+	m.postLoading = true
+	client := m.client
+	channelID := m.channel.ID
+	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		page, err := client.GetChannelPosts(context.Background(), channelID, "")
+		if err != nil {
+			return PostsLoadedMsg{ChannelID: channelID, Err: err}
+		}
+		return PostsLoadedMsg{
+			ChannelID: channelID,
+			Posts:     page.Items,
+			NextToken: page.NextToken,
+		}
+	})
+}
+
+func (m *Model) loadMorePosts() tea.Cmd {
+	if m.postLoadMore || m.postLoading || m.postToken == "" {
+		return nil
+	}
+	m.postLoadMore = true
+	token := m.postToken
+	client := m.client
+	channelID := m.channel.ID
+	return func() tea.Msg {
+		page, err := client.GetChannelPosts(context.Background(), channelID, token)
+		if err != nil {
+			return PostsLoadedMsg{ChannelID: channelID, Err: err, Append: true}
+		}
+		return PostsLoadedMsg{
+			ChannelID: channelID,
+			Posts:     page.Items,
+			NextToken: page.NextToken,
+			Append:    true,
+		}
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -279,6 +345,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
+	case PostsLoadedMsg:
+		if msg.ChannelID != m.channel.ID {
+			return m, nil
+		}
+		m.postLoading = false
+		m.postLoadMore = false
+		m.postLoaded = true
+		if msg.Err != nil {
+			return m, nil
+		}
+		m.postToken = msg.NextToken
+
+		var newItems []list.Item
+		for _, p := range msg.Posts {
+			newItems = append(newItems, shared.PostItem{Post: p})
+		}
+		cmds = append(cmds, shared.AppendItems(&m.postList, newItems, msg.Append))
+		return m, tea.Batch(cmds...)
+
 	case tea.KeyMsg:
 		switch {
 		case msg.String() == "tab":
@@ -322,11 +407,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					cmds = append(cmds, m.loadMorePlaylists())
 				}
 			}
+		case tabPosts:
+			if !m.postLoading {
+				if key.Matches(msg, selectKey) {
+					if item, ok := m.postList.SelectedItem().(shared.PostItem); ok {
+						return m, func() tea.Msg {
+							return PostSelectedMsg{Post: item.Post}
+						}
+					}
+				}
+				var cmd tea.Cmd
+				m.postList, cmd = m.postList.Update(msg)
+				cmds = append(cmds, cmd)
+				if shared.ShouldLoadMore(m.postList, 5) {
+					cmds = append(cmds, m.loadMorePosts())
+				}
+			}
 		}
 		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
-		if m.videoLoading || m.playlistLoading {
+		if m.videoLoading || m.playlistLoading || m.postLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -342,6 +443,8 @@ func (m *Model) onTabSwitch() tea.Cmd {
 	switch m.activeTab {
 	case tabPlaylists:
 		return m.loadPlaylists()
+	case tabPosts:
+		return m.loadPosts()
 	}
 	return nil
 }
@@ -359,7 +462,7 @@ func (m Model) renderActiveTab() string {
 	case tabPlaylists:
 		return m.renderPlaylists()
 	case tabPosts:
-		return styles.Dim.Render("Posts — coming soon")
+		return m.renderPosts()
 	}
 	return ""
 }
@@ -369,6 +472,13 @@ func (m Model) renderVideos() string {
 		return m.spinner.View() + fmt.Sprintf(" Loading videos for %s...", m.channel.Name)
 	}
 	return m.thumbList.WrapView(shared.VisibleItems(m.videoList), m.videoList.View())
+}
+
+func (m Model) renderPosts() string {
+	if m.postLoading && !m.postLoaded {
+		return m.spinner.View() + " Loading posts..."
+	}
+	return m.postList.View()
 }
 
 func (m Model) renderPlaylists() string {

@@ -4,7 +4,7 @@
       "tabs": [
         {
           "tabRenderer": {
-            "title": "Community",
+            "title": "Posts",
             "selected": true,
             "content": {
               "sectionListRenderer": {
@@ -40,19 +40,22 @@
                                     "replyButton": {
                                       "buttonRenderer": {
                                         "navigationEndpoint": {
-                                          "continuationCommand": {
-                                            "token": "fake_post_comments_token_001"
+                                          "browseEndpoint": {
+                                            "browseId": "FEpost_detail",
+                                            "params": "fake_post_detail_params_001"
                                           }
                                         }
                                       }
                                     }
                                   }
                                 },
-                                "backstageImageRenderer": {
-                                  "image": {
-                                    "thumbnails": [
-                                      {"url": "https://yt3.ggpht.com/fake_post_image.jpg", "width": 640, "height": 480}
-                                    ]
+                                "backstageAttachment": {
+                                  "backstageImageRenderer": {
+                                    "image": {
+                                      "thumbnails": [
+                                        {"url": "https://yt3.ggpht.com/fake_post_image.jpg", "width": 640, "height": 480}
+                                      ]
+                                    }
                                   }
                                 }
                               }
