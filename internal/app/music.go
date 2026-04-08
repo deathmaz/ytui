@@ -685,6 +685,7 @@ func (m *MusicModel) loadHome() tea.Cmd {
 		return nil
 	}
 	m.homeLoading = true
+	m.thumbList.Invalidate()
 	client := m.client
 	return tea.Batch(m.spinner.Tick, func() (msg tea.Msg) {
 		defer func() {
@@ -705,6 +706,7 @@ func (m *MusicModel) loadLibrary() tea.Cmd {
 		return nil
 	}
 	m.libraryLoading = true
+	m.thumbList.Invalidate()
 
 	// Initialize sub-tabs with empty lists
 	sections := youtube.LibrarySections
@@ -889,6 +891,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 	m.tabs.SetActive(idx)
 	m.onFixedView = false
 	m.pageLoading = true
+	m.thumbList.Invalidate()
 
 	client := m.client
 	switch kind {

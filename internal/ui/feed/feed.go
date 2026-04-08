@@ -70,6 +70,9 @@ func (m *Model) Load(force bool) tea.Cmd {
 	}
 	m.loading = true
 	m.nextToken = ""
+	// Invalidate thumbnail tracking so images are re-transmitted when the
+	// list becomes visible again after the loading spinner.
+	m.thumbList.Invalidate()
 	client := m.client
 	return tea.Batch(m.spinner.Tick, func() (msg tea.Msg) {
 		defer func() {

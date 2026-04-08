@@ -221,6 +221,7 @@ func (m *Model) loadVideos() tea.Cmd {
 	}
 	m.videoLoading = true
 	m.videoToken = ""
+	m.thumbList.Invalidate()
 	client := m.client
 	channelID := m.channel.ID
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
@@ -263,6 +264,7 @@ func (m *Model) loadPlaylists() tea.Cmd {
 		return nil
 	}
 	m.playlistLoading = true
+	m.plThumbList.Invalidate()
 	client := m.client
 	channelID := m.channel.ID
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
@@ -347,6 +349,7 @@ func (m *Model) loadStreams() tea.Cmd {
 		return nil
 	}
 	m.streamLoading = true
+	m.thumbList.Invalidate()
 	client := m.client
 	channelID := m.channel.ID
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
@@ -567,6 +570,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // onTabSwitch triggers lazy loading when switching to a sub-tab for the first time.
+// Cross-ThumbList invalidation (videos ↔ playlists) is handled automatically
+// by the global DeleteAll generation counter — no manual Invalidate needed here.
 func (m *Model) onTabSwitch() tea.Cmd {
 	switch m.activeTab {
 	case tabPlaylists:

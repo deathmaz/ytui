@@ -3,7 +3,10 @@ package shared
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -11,11 +14,53 @@ import (
 	ytimage "github.com/deathmaz/ytui/internal/image"
 )
 
+// thumbDebugFile is the debug log file, opened once if YTUI_THUMB_DEBUG is set.
+var thumbDebugFile *os.File
+
+func init() {
+	if path := os.Getenv("YTUI_THUMB_DEBUG"); path != "" {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err == nil {
+			thumbDebugFile = f
+		}
+	}
+}
+
+func thumbLog(format string, args ...interface{}) {
+	if thumbDebugFile == nil {
+		return
+	}
+	ts := time.Now().Format("15:04:05.000")
+	fmt.Fprintf(thumbDebugFile, "%s  "+format+"\n", append([]interface{}{ts}, args...)...)
+	thumbDebugFile.Sync()
+}
+
+// globalDeleteGen is bumped every time any ThumbList sends DeleteAll.
+// Because DeleteAll is a global Kitty operation (clears ALL images, not
+// just the sender's), every other ThumbList must retransmit on the next
+// WrapView call. Each ThumbList records the gen it last transmitted at;
+// a mismatch forces retransmit.
+var globalDeleteGen atomic.Uint64
+
+func init() {
+	globalDeleteGen.Store(1) // start at 1 so zero means "never transmitted"
+}
+
 // ThumbList manages Kitty image transmit sequences for lists with thumbnails.
 // One ThumbList per renderer, shared across all lists using that renderer.
+//
+// Strategy: on every call, build a cheap fingerprint of which visible URLs
+// have cached images. If the fingerprint is identical to the previous call
+// (cursor blink, idle re-render) return the plain view — zero image
+// overhead. When the fingerprint differs (new image loaded, page change,
+// view switch) send DeleteAll + re-transmit ALL visible images. This is
+// the same as the pre-optimisation code, just not on every frame.
 type ThumbList struct {
-	imgR   *ytimage.Renderer
-	getURL func(list.Item) string
+	imgR            *ytimage.Renderer
+	getURL          func(list.Item) string
+	lastFingerprint string // cached-URL fingerprint from previous WrapView
+	lastDeleteGen   uint64 // globalDeleteGen value when we last transmitted
+	repeatCount     int    // frames left to keep retransmitting after a change
 }
 
 // NewThumbList creates a new ThumbList with the given renderer and URL extractor.
@@ -65,28 +110,119 @@ func VisibleItems(l list.Model) []list.Item {
 	return items[start:end]
 }
 
-// WrapView prepends Kitty image sequences for visible items. Clears all
-// images and re-transmits visible ones each frame to prevent stale images
-// from other views. Only pass VISIBLE items (use VisibleItems).
+// WrapView prepends Kitty image sequences for visible items.
+//
+// It builds a fingerprint of which visible URLs currently have cached
+// images. When the fingerprint matches the previous call (cursor blink,
+// idle re-render) the plain view is returned — zero image overhead.
+// When the fingerprint differs (new image loaded, page change, view
+// switch, refresh) DeleteAll + full re-transmit of every visible image
+// is sent. This is equivalent to the original always-retransmit
+// approach, just skipped on frames where nothing changed.
+//
+// Only pass VISIBLE items (use VisibleItems).
 func (t *ThumbList) WrapView(items []list.Item, view string) string {
 	if t == nil || t.imgR == nil {
 		return view
 	}
-	var tx strings.Builder
+
+	// Single pass: build fingerprint and collect cached transmit data.
+	// The fingerprint is the ordered list of visible URLs that have cached
+	// image data. cachedTx holds (url, transmitStr) pairs for retransmit —
+	// only populated when we'll actually need to transmit.
+	type cachedEntry struct {
+		url         string
+		transmitStr string
+	}
+	var fp strings.Builder
+	var cached []cachedEntry
+	nURLs := 0
+	seen := make(map[string]bool)
 	for _, item := range items {
 		url := t.getURL(item)
-		if url == "" {
+		if url == "" || seen[url] {
 			continue
 		}
-		transmitStr, pl := t.imgR.Get(url)
-		if pl != "" && transmitStr != "" {
-			tx.WriteString(transmitStr)
+		seen[url] = true
+		nURLs++
+		transmitStr, _ := t.imgR.Get(url)
+		if transmitStr != "" {
+			fp.WriteString(url)
+			fp.WriteByte(0)
+			cached = append(cached, cachedEntry{url, transmitStr})
 		}
 	}
-	if tx.Len() > 0 {
-		return ytimage.DeleteAll() + tx.String() + view
+
+	fingerprint := fp.String()
+	if fingerprint == "" {
+		// No images cached yet. If we were invalidated (view switch,
+		// loading spinner), send a bare DeleteAll to purge old images
+		// from Kitty that belong to the previous view.
+		if t.lastDeleteGen == 0 && t.lastFingerprint == "" {
+			thumbLog("[%p] DELETE_STALE  items=%d", t, nURLs)
+			t.lastDeleteGen = globalDeleteGen.Add(1)
+			return ytimage.DeleteAll() + view
+		}
+		thumbLog("[%p] SKIP (no cached)  items=%d", t, nURLs)
+		return view
 	}
-	return view
+
+	gen := globalDeleteGen.Load()
+	changed := fingerprint != t.lastFingerprint || gen != t.lastDeleteGen
+	if changed {
+		// Schedule retransmit for this frame and one more. The repeat
+		// ensures Kitty processes the data even if the first frame's
+		// output was only partially consumed during rapid loading.
+		t.repeatCount = 2
+	}
+	if t.repeatCount <= 0 {
+		thumbLog("[%p] SKIP (stable)  gen=%d  cached=%d/%d",
+			t, gen, len(cached), nURLs)
+		return view
+	}
+	t.repeatCount--
+
+	oldGen := t.lastDeleteGen
+	t.lastFingerprint = fingerprint
+	t.lastDeleteGen = globalDeleteGen.Add(1)
+
+	if thumbDebugFile != nil {
+		reason := "repeat"
+		if changed {
+			reason = "fingerprint_changed"
+			if gen != oldGen {
+				reason = fmt.Sprintf("gen_mismatch(cur=%d,last=%d)", gen, oldGen)
+			}
+		}
+		urls := make([]string, len(cached))
+		for i, c := range cached {
+			urls[i] = c.url
+		}
+		thumbLog("[%p] RETRANSMIT  reason=%s  oldGen=%d  newGen=%d  cached=%v",
+			t, reason, oldGen, t.lastDeleteGen, urls)
+	}
+
+	var tx strings.Builder
+	tx.WriteString(ytimage.DeleteAll())
+	for _, c := range cached {
+		tx.WriteString(c.transmitStr)
+	}
+	tx.WriteString(view)
+	return tx.String()
+}
+
+// Invalidate forces the next WrapView call to re-transmit all images.
+// Use when the view was hidden (loading spinner) or another ThumbList
+// issued DeleteAll (channel sub-tab switches).
+func (t *ThumbList) Invalidate() {
+	if t == nil {
+		return
+	}
+	thumbLog("[%p] INVALIDATE  oldGen=%d  oldFingerprint=%q",
+		t, t.lastDeleteGen, t.lastFingerprint)
+	t.lastFingerprint = ""
+	t.lastDeleteGen = 0 // mismatch any gen ≥ 1 → forces retransmit
+	t.repeatCount = 0
 }
 
 // TriggerFetch forwards msg to a list so that the delegate's Update fires

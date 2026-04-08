@@ -140,6 +140,7 @@ func (m *Model) Refresh() tea.Cmd {
 	}
 	m.nextToken = ""
 	m.searching = true
+	m.thumbList.Invalidate()
 	m.results.SetItems(nil)
 	m.results.ResetSelected()
 	return tea.Batch(m.spinner.Tick, m.searchCmd(m.query, "", false))
@@ -183,6 +184,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.query = query
 			m.nextToken = ""
 			m.searching = true
+			m.thumbList.Invalidate()
 			m.focused = focusList
 			m.input.Blur()
 			m.results.SetItems(nil)

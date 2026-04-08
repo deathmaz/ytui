@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 	ytimage "github.com/deathmaz/ytui/internal/image"
@@ -1291,4 +1292,219 @@ func TestVideoMode_RefreshChannelStreamsTab(t *testing.T) {
 		t.Errorf("expected streams to be re-fetched on refresh, calls before=%d after=%d", before, after)
 	}
 	quitAndGetVideoModel(t, tm)
+}
+
+// ---------------------------------------------------------------------------
+// Thumbnail WrapView integration tests
+// ---------------------------------------------------------------------------
+
+// wrapViewStabilize calls WrapView enough times to get past the initial
+// retransmit and its repeat frame, returning the ThumbList to stable skip state.
+func wrapViewStabilize(tl *shared.ThumbList, items []list.Item, view string) {
+	for i := 0; i < 5; i++ {
+		tl.WrapView(items, view)
+	}
+}
+
+// TestVideoMode_WrapViewSkipsOnStableFrame verifies that after thumbnails are
+// fully loaded, subsequent View() calls return plain view (no DeleteAll or
+// transmit sequences). This is the core flicker-prevention optimisation.
+func TestVideoMode_WrapViewSkipsOnStableFrame(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	m := New(&mockYTClient{authenticated: true}, cfg, Options{})
+
+	tl := m.listThumbList
+	if tl == nil {
+		t.Fatal("expected listThumbList")
+	}
+	imgR := tl.Renderer()
+
+	imgR.Store("https://fake.test/v1.jpg", "TX1", "PL1")
+	imgR.Store("https://fake.test/v2.jpg", "TX2", "PL2")
+
+	items := []list.Item{
+		shared.VideoItem{Video: youtube.Video{ID: "v1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/v1.jpg", Width: 320}}}},
+		shared.VideoItem{Video: youtube.Video{ID: "v2", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/v2.jpg", Width: 320}}}},
+	}
+
+	// First + repeat calls transmit.
+	out1 := tl.WrapView(items, "view")
+	if out1 == "view" {
+		t.Error("first call should transmit, not skip")
+	}
+	out2 := tl.WrapView(items, "view")
+	if out2 == "view" {
+		t.Error("repeat call should transmit, not skip")
+	}
+
+	// Subsequent calls must skip (cursor blink frames).
+	for i := 0; i < 3; i++ {
+		out := tl.WrapView(items, "view")
+		if out != "view" {
+			t.Errorf("frame %d: expected plain view (skip), got output with image data", i)
+		}
+	}
+}
+
+// TestVideoMode_WrapViewInvalidateOnFeedRefresh verifies that refreshing the
+// feed (Load with force=true) invalidates the ThumbList so thumbnails
+// re-transmit when the feed reloads after the loading spinner.
+func TestVideoMode_WrapViewInvalidateOnFeedRefresh(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	m := New(&mockYTClient{
+		authenticated: true,
+		getFeedFn: func(_ context.Context, _ string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "f1", Title: "Feed1"}},
+			}, nil
+		},
+	}, cfg, Options{})
+
+	tl := m.listThumbList
+	imgR := tl.Renderer()
+	imgR.Store("https://fake.test/f1.jpg", "TX_F1", "PL_F1")
+
+	items := []list.Item{shared.VideoItem{Video: youtube.Video{
+		ID: "f1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/f1.jpg", Width: 320}},
+	}}}
+
+	// Stabilise.
+	wrapViewStabilize(tl, items, "V")
+	if out := tl.WrapView(items, "V"); out != "V" {
+		t.Fatal("expected stable skip before refresh")
+	}
+
+	// feed.Load(true) calls Invalidate internally.
+	m.feed.Load(true)
+
+	// Next WrapView must retransmit.
+	if out := tl.WrapView(items, "V"); out == "V" {
+		t.Error("after feed refresh, WrapView should retransmit, not skip")
+	}
+}
+
+// TestVideoMode_CrossThumbListGenCounter verifies that when one ThumbList
+// sends DeleteAll (bumping the global gen counter), another ThumbList
+// detects the gen mismatch and retransmits. This covers the scenario of
+// switching between channel videos and playlists sub-tabs.
+func TestVideoMode_CrossThumbListGenCounter(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	m := New(&mockYTClient{authenticated: true}, cfg, Options{})
+
+	listTL := m.listThumbList
+	if listTL == nil {
+		t.Fatal("expected listThumbList")
+	}
+
+	// Create a second ThumbList sharing the same renderer (simulates plThumbList).
+	plTL := shared.NewThumbList(listTL.Renderer(), shared.PlaylistThumbURL)
+
+	imgR := listTL.Renderer()
+	imgR.Store("https://fake.test/vid.jpg", "TX_VID", "PL_VID")
+	imgR.Store("https://fake.test/pl.jpg", "TX_PL", "PL_PL")
+
+	vidItems := []list.Item{shared.VideoItem{Video: youtube.Video{
+		ID: "vid1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/vid.jpg", Width: 320}},
+	}}}
+	plItems := []list.Item{shared.PlaylistItem{Playlist: youtube.Playlist{
+		ID: "pl1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/pl.jpg", Width: 320}},
+	}}}
+
+	// Stabilise listThumbList.
+	wrapViewStabilize(listTL, vidItems, "V")
+	if out := listTL.WrapView(vidItems, "V"); out != "V" {
+		t.Fatal("listThumbList should be stable")
+	}
+
+	// plThumbList transmits (sends DeleteAll, bumps gen).
+	if out := plTL.WrapView(plItems, "PV"); out == "PV" {
+		t.Fatal("plThumbList should transmit on first call")
+	}
+
+	// listThumbList must detect gen mismatch and retransmit.
+	if out := listTL.WrapView(vidItems, "V"); out == "V" {
+		t.Error("listThumbList should retransmit after plThumbList's DeleteAll (gen mismatch)")
+	}
+}
+
+// TestMusicMode_WrapViewInvalidateOnHomeLoad verifies that loading the
+// music home view invalidates the ThumbList so thumbnails re-transmit
+// when the home tab renders after the loading spinner.
+func TestMusicMode_WrapViewInvalidateOnHomeLoad(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+
+	imgR := ytimage.NewRenderer()
+	m := NewMusic(
+		&mockMusicClient{authenticated: true},
+		&mockYTClient{authenticated: true},
+		cfg, imgR, Options{},
+	)
+
+	tl := m.thumbList
+	if tl == nil {
+		t.Fatal("expected thumbList")
+	}
+
+	imgR.Store("https://fake.test/song.jpg", "TX_SONG", "PL_SONG")
+
+	fakeItems := []list.Item{musicItem{item: youtube.MusicItem{
+		Title: "Fake", Type: youtube.MusicSong,
+		Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/song.jpg", Width: 226}},
+	}}}
+	wrapViewStabilize(tl, fakeItems, "V")
+	if out := tl.WrapView(fakeItems, "V"); out != "V" {
+		t.Fatal("expected stable skip before loadHome")
+	}
+
+	// loadHome sets homeLoading=true and calls Invalidate.
+	m.loadHome()
+
+	if out := tl.WrapView(fakeItems, "V"); out == "V" {
+		t.Error("after loadHome, WrapView should retransmit, not skip")
+	}
+}
+
+// TestMusicMode_WrapViewInvalidateOnLibraryLoad verifies that loading the
+// music library invalidates the ThumbList.
+func TestMusicMode_WrapViewInvalidateOnLibraryLoad(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+
+	imgR := ytimage.NewRenderer()
+	m := NewMusic(
+		&mockMusicClient{authenticated: true},
+		&mockYTClient{authenticated: true},
+		cfg, imgR, Options{},
+	)
+
+	tl := m.thumbList
+	if tl == nil {
+		t.Fatal("expected thumbList")
+	}
+
+	imgR.Store("https://fake.test/song.jpg", "TX_SONG", "PL_SONG")
+
+	fakeItems := []list.Item{musicItem{item: youtube.MusicItem{
+		Title: "Fake", Type: youtube.MusicSong,
+		Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/song.jpg", Width: 226}},
+	}}}
+	wrapViewStabilize(tl, fakeItems, "V")
+	if out := tl.WrapView(fakeItems, "V"); out != "V" {
+		t.Fatal("expected stable skip before loadLibrary")
+	}
+
+	m.loadLibrary()
+
+	if out := tl.WrapView(fakeItems, "V"); out == "V" {
+		t.Error("after loadLibrary, WrapView should retransmit, not skip")
+	}
 }

@@ -75,6 +75,7 @@ func (m *Model) Load(pl youtube.Playlist) tea.Cmd {
 	m.loading = true
 	m.loaded = false
 	m.nextToken = ""
+	m.thumbList.Invalidate()
 
 	client := m.client
 	playlistID := pl.ID
