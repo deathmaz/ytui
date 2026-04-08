@@ -1,0 +1,94 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "title": "Live",
+            "selected": true,
+            "content": {
+              "richGridRenderer": {
+                "contents": [
+                  {
+                    "richItemRenderer": {
+                      "content": {
+                        "videoRenderer": {
+                          "videoId": "fake_stream_001",
+                          "title": {
+                            "runs": [{"text": "Fake Livestream One"}]
+                          },
+                          "ownerText": {
+                            "runs": [
+                              {
+                                "text": "Fake Streamer",
+                                "navigationEndpoint": {
+                                  "browseEndpoint": {
+                                    "browseId": "UCfake_streamer_001"
+                                  }
+                                }
+                              }
+                            ]
+                          },
+                          "lengthText": {"simpleText": "3:45:12"},
+                          "viewCountText": {"simpleText": "12,345 views"},
+                          "publishedTimeText": {"simpleText": "Streamed 2 days ago"},
+                          "thumbnail": {
+                            "thumbnails": [
+                              {"url": "https://i.ytimg.com/vi/fake_stream_001/default.jpg", "width": 120, "height": 90},
+                              {"url": "https://i.ytimg.com/vi/fake_stream_001/hqdefault.jpg", "width": 480, "height": 360}
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "richItemRenderer": {
+                      "content": {
+                        "videoRenderer": {
+                          "videoId": "fake_stream_002",
+                          "title": {
+                            "runs": [{"text": "Fake Livestream Two"}]
+                          },
+                          "ownerText": {
+                            "runs": [
+                              {
+                                "text": "Fake Streamer",
+                                "navigationEndpoint": {
+                                  "browseEndpoint": {
+                                    "browseId": "UCfake_streamer_001"
+                                  }
+                                }
+                              }
+                            ]
+                          },
+                          "lengthText": {"simpleText": "5:20:00"},
+                          "viewCountText": {"simpleText": "8,901 views"},
+                          "publishedTimeText": {"simpleText": "Streamed 5 days ago"},
+                          "thumbnail": {
+                            "thumbnails": [
+                              {"url": "https://i.ytimg.com/vi/fake_stream_002/hqdefault.jpg", "width": 480, "height": 360}
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "continuationItemRenderer": {
+                      "continuationEndpoint": {
+                        "continuationCommand": {
+                          "token": "fake_channel_streams_continuation_token"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

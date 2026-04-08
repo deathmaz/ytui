@@ -22,10 +22,11 @@ const (
 	tabVideos    = 0
 	tabPlaylists = 1
 	tabPosts     = 2
+	tabStreams   = 3
 )
 
 var (
-	subTabNames = []string{"Videos", "Playlists", "Posts"}
+	subTabNames = []string{"Videos", "Playlists", "Posts", "Livestreams"}
 	selectKey   = key.NewBinding(key.WithKeys("enter"))
 )
 
@@ -51,6 +52,15 @@ type PlaylistsLoadedMsg struct {
 type PostsLoadedMsg struct {
 	ChannelID string
 	Posts     []youtube.Post
+	NextToken string
+	Append    bool
+	Err       error
+}
+
+// StreamsLoadedMsg carries channel livestream results.
+type StreamsLoadedMsg struct {
+	ChannelID string
+	Videos    []youtube.Video
 	NextToken string
 	Append    bool
 	Err       error
@@ -91,6 +101,12 @@ type Model struct {
 	postLoaded   bool
 	postLoadMore bool
 
+	streamList     list.Model
+	streamToken    string
+	streamLoading  bool
+	streamLoaded   bool
+	streamLoadMore bool
+
 	spinner spinner.Model
 	client  youtube.Client
 	width   int
@@ -109,6 +125,7 @@ func New(client youtube.Client, videoDelegate list.ItemDelegate, thumbList *shar
 		playlistList: shared.NewList(plDelegate),
 		plThumbList:  plThumb,
 		postList:     shared.NewList(shared.PostDelegate{}),
+		streamList:   shared.NewList(videoDelegate),
 		spinner:      styles.NewSpinner(),
 		client:       client,
 	}
@@ -149,16 +166,22 @@ func (m *Model) SetSize(w, h int) {
 	m.videoList.SetSize(w, listH)
 	m.playlistList.SetSize(w, listH)
 	m.postList.SetSize(w, listH)
+	m.streamList.SetSize(w, listH)
 }
 
 // SelectedVideo returns the currently selected video, if any.
 func (m *Model) SelectedVideo() *youtube.Video {
-	if m.activeTab != tabVideos {
-		return nil
-	}
-	if item, ok := m.videoList.SelectedItem().(shared.VideoItem); ok {
-		v := item.Video
-		return &v
+	switch m.activeTab {
+	case tabVideos:
+		if item, ok := m.videoList.SelectedItem().(shared.VideoItem); ok {
+			v := item.Video
+			return &v
+		}
+	case tabStreams:
+		if item, ok := m.streamList.SelectedItem().(shared.VideoItem); ok {
+			v := item.Video
+			return &v
+		}
 	}
 	return nil
 }
@@ -175,6 +198,9 @@ func (m *Model) Refresh() tea.Cmd {
 	case tabPosts:
 		m.postLoaded = false
 		return m.loadPosts()
+	case tabStreams:
+		m.streamLoaded = false
+		return m.loadStreams()
 	}
 	return nil
 }
@@ -185,6 +211,7 @@ func (m *Model) Load(ch youtube.Channel) tea.Cmd {
 	m.videoLoaded = false
 	m.playlistLoaded = false
 	m.postLoaded = false
+	m.streamLoaded = false
 	return m.loadVideos()
 }
 
@@ -315,6 +342,48 @@ func (m *Model) loadMorePosts() tea.Cmd {
 	}
 }
 
+func (m *Model) loadStreams() tea.Cmd {
+	if m.streamLoading || m.streamLoaded {
+		return nil
+	}
+	m.streamLoading = true
+	client := m.client
+	channelID := m.channel.ID
+	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		page, err := client.GetChannelStreams(context.Background(), channelID, "")
+		if err != nil {
+			return StreamsLoadedMsg{ChannelID: channelID, Err: err}
+		}
+		return StreamsLoadedMsg{
+			ChannelID: channelID,
+			Videos:    page.Items,
+			NextToken: page.NextToken,
+		}
+	})
+}
+
+func (m *Model) loadMoreStreams() tea.Cmd {
+	if m.streamLoadMore || m.streamLoading || m.streamToken == "" {
+		return nil
+	}
+	m.streamLoadMore = true
+	token := m.streamToken
+	client := m.client
+	channelID := m.channel.ID
+	return func() tea.Msg {
+		page, err := client.GetChannelStreams(context.Background(), channelID, token)
+		if err != nil {
+			return StreamsLoadedMsg{ChannelID: channelID, Err: err, Append: true}
+		}
+		return StreamsLoadedMsg{
+			ChannelID: channelID,
+			Videos:    page.Items,
+			NextToken: page.NextToken,
+			Append:    true,
+		}
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -384,6 +453,29 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		cmds = append(cmds, shared.AppendItems(&m.postList, newItems, msg.Append))
 		return m, tea.Batch(cmds...)
 
+	case StreamsLoadedMsg:
+		if msg.ChannelID != m.channel.ID {
+			return m, nil
+		}
+		m.streamLoading = false
+		m.streamLoadMore = false
+		m.streamLoaded = true
+		if msg.Err != nil {
+			return m, nil
+		}
+		m.streamToken = msg.NextToken
+
+		var newItems []list.Item
+		for _, v := range msg.Videos {
+			newItems = append(newItems, shared.VideoItem{Video: v})
+		}
+		cmds = append(cmds, shared.AppendItems(&m.streamList, newItems, msg.Append))
+		// Forward to stream list so the delegate triggers thumbnail fetches.
+		var cmd tea.Cmd
+		m.streamList, cmd = m.streamList.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
 	case tea.KeyMsg:
 		switch {
 		case msg.String() == "tab":
@@ -443,11 +535,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					cmds = append(cmds, m.loadMorePosts())
 				}
 			}
+		case tabStreams:
+			if !m.streamLoading {
+				if key.Matches(msg, selectKey) {
+					if item, ok := m.streamList.SelectedItem().(shared.VideoItem); ok {
+						return m, func() tea.Msg {
+							return shared.VideoSelectedMsg{Video: item.Video}
+						}
+					}
+				}
+				var cmd tea.Cmd
+				m.streamList, cmd = m.streamList.Update(msg)
+				cmds = append(cmds, cmd)
+				if shared.ShouldLoadMore(m.streamList, 5) {
+					cmds = append(cmds, m.loadMoreStreams())
+				}
+			}
 		}
 		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
-		if m.videoLoading || m.playlistLoading || m.postLoading {
+		if m.videoLoading || m.playlistLoading || m.postLoading || m.streamLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -465,6 +573,8 @@ func (m *Model) onTabSwitch() tea.Cmd {
 		return m.loadPlaylists()
 	case tabPosts:
 		return m.loadPosts()
+	case tabStreams:
+		return m.loadStreams()
 	}
 	return nil
 }
@@ -483,6 +593,8 @@ func (m Model) renderActiveTab() string {
 		return m.renderPlaylists()
 	case tabPosts:
 		return m.renderPosts()
+	case tabStreams:
+		return m.renderStreams()
 	}
 	return ""
 }
@@ -506,4 +618,11 @@ func (m Model) renderPlaylists() string {
 		return m.spinner.View() + " Loading playlists..."
 	}
 	return m.plThumbList.WrapView(shared.VisibleItems(m.playlistList), m.playlistList.View())
+}
+
+func (m Model) renderStreams() string {
+	if m.streamLoading && !m.streamLoaded {
+		return m.spinner.View() + " Loading livestreams..."
+	}
+	return m.thumbList.WrapView(shared.VisibleItems(m.streamList), m.streamList.View())
 }

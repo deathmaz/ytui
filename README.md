@@ -7,7 +7,7 @@ A terminal-based YouTube client built with Go and [Bubble Tea](https://github.co
 ### Video Mode
 - **Search** YouTube videos with infinite scroll
 - **Subscription feed** and **channel list** (requires authentication)
-- **Channel details** with Videos, Playlists, and Posts sub-tabs
+- **Channel details** with Videos, Playlists, Posts, and Livestreams sub-tabs
 - **Playlist view** with paginated video list
 - **Community posts** with detail view and comments
 - **Video details** with views, likes, description, and thumbnail

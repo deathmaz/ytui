@@ -1044,6 +1044,85 @@ func TestGolden_Video_Channel_Posts(t *testing.T) {
 	waitThenCapture(t, tm, "challenge runs")
 }
 
+func TestGolden_Video_Channel_Streams(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_ch_001", Name: "Fake Channel"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cv1", Title: "A Video", ChannelName: "Fake Channel"}},
+			}, nil
+		},
+		getChannelStreamsFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "ls1", Title: "Friday Night Stream", ChannelName: "Fake Channel", DurationStr: "4:32:10", ViewCount: "15K views"},
+					{ID: "ls2", Title: "Weekend Marathon", ChannelName: "Fake Channel", DurationStr: "6:15:00", ViewCount: "8K views"},
+				},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendSpecialKey(tm, tea.KeyTab) // playlists
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab) // posts
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab) // livestreams
+	waitThenCapture(t, tm, "Friday Night Stream")
+}
+
+func TestGolden_Video_Channel_Streams_WithThumbnails(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCfake_ch_001", Name: "Fake Channel"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cv1", Title: "A Video", ChannelName: "Fake Channel"}},
+			}, nil
+		},
+		getChannelStreamsFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{
+					{ID: "ls1", Title: "Friday Night Stream", ChannelName: "Fake Channel", DurationStr: "4:32:10", ViewCount: "15K views",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/ls1.jpg", Width: 320}}},
+					{ID: "ls2", Title: "Weekend Marathon", ChannelName: "Fake Channel", DurationStr: "6:15:00", ViewCount: "8K views",
+						Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/ls2.jpg", Width: 320}}},
+				},
+			}, nil
+		},
+	}
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendSpecialKey(tm, tea.KeyTab) // playlists
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab) // posts
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab) // livestreams
+	waitThenCapture(t, tm, "Friday Night Stream")
+}
+
 func TestGolden_Video_Post_Detail_Content(t *testing.T) {
 	tm := newTestVideoProgram(t, newPostTestClient())
 	sendKey(tm, "2")

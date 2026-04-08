@@ -18,9 +18,10 @@ type mockYTClient struct {
 	getRepliesFn  func(ctx context.Context, commentID, token string) (*youtube.Page[youtube.Comment], error)
 	getSubsFn     func(ctx context.Context, token string) (*youtube.Page[youtube.Channel], error)
 	getFeedFn     func(ctx context.Context, token string) (*youtube.Page[youtube.Video], error)
-	getChannelVideosFn          func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error)
+	getChannelVideosFn    func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error)
 	getChannelPlaylistsFn func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Playlist], error)
 	getChannelPostsFn     func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Post], error)
+	getChannelStreamsFn   func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error)
 	getPlaylistVideosFn   func(ctx context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error)
 	getPostCommentsFn     func(ctx context.Context, postID, token string) (*youtube.Page[youtube.Comment], error)
 
@@ -108,6 +109,13 @@ func (m *mockYTClient) GetChannelPosts(ctx context.Context, channelID, token str
 		return m.getChannelPostsFn(ctx, channelID, token)
 	}
 	return &youtube.Page[youtube.Post]{}, nil
+}
+
+func (m *mockYTClient) GetChannelStreams(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+	if m.getChannelStreamsFn != nil {
+		return m.getChannelStreamsFn(ctx, channelID, token)
+	}
+	return &youtube.Page[youtube.Video]{}, nil
 }
 
 func (m *mockYTClient) GetPlaylistVideos(ctx context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error) {

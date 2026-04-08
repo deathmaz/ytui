@@ -31,6 +31,9 @@ type Client interface {
 	// GetChannelPosts returns community posts from a channel.
 	GetChannelPosts(ctx context.Context, channelID string, pageToken string) (*Page[Post], error)
 
+	// GetChannelStreams returns livestreams from a channel.
+	GetChannelStreams(ctx context.Context, channelID string, pageToken string) (*Page[Video], error)
+
 	// GetPlaylistVideos returns videos in a playlist.
 	GetPlaylistVideos(ctx context.Context, playlistID string, pageToken string) (*Page[Video], error)
 

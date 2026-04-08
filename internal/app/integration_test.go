@@ -1200,3 +1200,95 @@ func TestVideoMode_RefreshPlaylistTab(t *testing.T) {
 	}
 	quitAndGetVideoModel(t, tm)
 }
+
+func TestVideoMode_ChannelStreamsLazyLoad(t *testing.T) {
+	var streamCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{{ID: "UCfake_lazy", Name: "Fake Lazy Channel"}},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "v1", Title: "A Video", ChannelName: "Fake Lazy Channel"}},
+			}, nil
+		},
+		getChannelStreamsFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			streamCalls.Add(1)
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "ls1", Title: "A Stream", ChannelName: "Fake Lazy Channel"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Lazy Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+
+	// Streams should not have been loaded yet (lazy)
+	if streamCalls.Load() != 0 {
+		t.Fatalf("expected 0 stream calls before switching tab, got %d", streamCalls.Load())
+	}
+
+	// Tab to playlists, posts, then livestreams
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(500 * time.Millisecond)
+
+	if streamCalls.Load() == 0 {
+		t.Errorf("expected streams to be loaded after switching to Livestreams tab")
+	}
+	quitAndGetVideoModel(t, tm)
+}
+
+func TestVideoMode_RefreshChannelStreamsTab(t *testing.T) {
+	var streamCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{{ID: "UCfake_str_ref", Name: "Fake Stream Channel"}},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "v1", Title: "A Video", ChannelName: "Fake Stream Channel"}},
+			}, nil
+		},
+		getChannelStreamsFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			streamCalls.Add(1)
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "ls1", Title: "A Stream", ChannelName: "Fake Stream Channel"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Stream Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+
+	// Switch to Livestreams tab
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(200 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	waitForContent(t, tm, "A Stream")
+
+	before := streamCalls.Load()
+	sendKey(tm, "r")
+	time.Sleep(500 * time.Millisecond)
+	after := streamCalls.Load()
+
+	if after <= before {
+		t.Errorf("expected streams to be re-fetched on refresh, calls before=%d after=%d", before, after)
+	}
+	quitAndGetVideoModel(t, tm)
+}

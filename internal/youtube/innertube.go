@@ -576,6 +576,7 @@ const (
 	channelVideosParams    = "EgZ2aWRlb3PyBgQKAjoA"
 	channelPlaylistsParams = "EglwbGF5bGlzdHPyBgQKAkIA"
 	channelPostsParams     = "EgVwb3N0c_IGBAoCSgA="
+	channelStreamsParams    = "EgdzdHJlYW1z8gYECgJ6AA"
 )
 
 // browseChannelTab calls Browse for a channel tab. On initial load it sends
@@ -595,9 +596,19 @@ func (c *InnerTubeClient) browseChannelTab(ctx context.Context, channelID, param
 }
 
 func (c *InnerTubeClient) GetChannelVideos(ctx context.Context, channelID string, pageToken string) (*Page[Video], error) {
-	data, err := c.browseChannelTab(ctx, channelID, channelVideosParams, pageToken)
+	return c.getChannelVideoTab(ctx, channelID, channelVideosParams, pageToken, "videos")
+}
+
+func (c *InnerTubeClient) GetChannelStreams(ctx context.Context, channelID string, pageToken string) (*Page[Video], error) {
+	return c.getChannelVideoTab(ctx, channelID, channelStreamsParams, pageToken, "streams")
+}
+
+// getChannelVideoTab fetches a channel tab that returns video items.
+// Both the Videos and Streams tabs use the same response format.
+func (c *InnerTubeClient) getChannelVideoTab(ctx context.Context, channelID, params, pageToken, label string) (*Page[Video], error) {
+	data, err := c.browseChannelTab(ctx, channelID, params, pageToken)
 	if err != nil {
-		return nil, fmt.Errorf("innertube channel videos: %w", err)
+		return nil, fmt.Errorf("innertube channel %s: %w", label, err)
 	}
 
 	var videos []Video

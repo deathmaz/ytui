@@ -258,6 +258,58 @@ func TestParseChannelVideosContinuation(t *testing.T) {
 	}
 }
 
+func TestParseChannelStreams(t *testing.T) {
+	raw := loadFixture(t, "testdata/fake_channel_streams_response.json")
+	data, err := toGJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var videos []Video
+	var nextToken string
+	tabs := data.Get("contents.twoColumnBrowseResultsRenderer.tabs")
+	tabs.ForEach(func(_, tab gjson.Result) bool {
+		tr := tab.Get("tabRenderer")
+		if !tr.Exists() || !tr.Get("selected").Bool() {
+			return true
+		}
+		contents := tr.Get("content.richGridRenderer.contents")
+		parseChannelVideoItems(contents, &videos, &nextToken)
+		return false
+	})
+
+	if len(videos) != 2 {
+		t.Fatalf("expected 2 streams, got %d", len(videos))
+	}
+
+	v := videos[0]
+	if v.ID != "fake_stream_001" {
+		t.Errorf("ID = %q, want fake_stream_001", v.ID)
+	}
+	if v.Title != "Fake Livestream One" {
+		t.Errorf("Title = %q", v.Title)
+	}
+	if v.ChannelName != "Fake Streamer" {
+		t.Errorf("ChannelName = %q", v.ChannelName)
+	}
+	if v.DurationStr != "3:45:12" {
+		t.Errorf("DurationStr = %q", v.DurationStr)
+	}
+	if v.ViewCount != "12,345 views" {
+		t.Errorf("ViewCount = %q", v.ViewCount)
+	}
+	if len(v.Thumbnails) == 0 {
+		t.Error("expected thumbnails")
+	}
+	if v.URL != VideoURL(v.ID) {
+		t.Errorf("URL = %q", v.URL)
+	}
+
+	if nextToken != "fake_channel_streams_continuation_token" {
+		t.Errorf("NextToken = %q", nextToken)
+	}
+}
+
 func TestParseChannelPlaylists(t *testing.T) {
 	raw := loadFixture(t, "testdata/fake_channel_playlists_response.json")
 	data, err := toGJSON(raw)
