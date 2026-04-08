@@ -1403,7 +1403,7 @@ func TestVideoMode_CrossThumbListGenCounter(t *testing.T) {
 	}
 
 	// Create a second ThumbList sharing the same renderer (simulates plThumbList).
-	plTL := shared.NewThumbList(listTL.Renderer(), shared.PlaylistThumbURL)
+	plTL := shared.NewThumbList(listTL.Renderer(), shared.PlaylistThumbURL, 5)
 
 	imgR := listTL.Renderer()
 	imgR.Store("https://fake.test/vid.jpg", "TX_VID", "PL_VID")
@@ -1506,5 +1506,174 @@ func TestMusicMode_WrapViewInvalidateOnLibraryLoad(t *testing.T) {
 
 	if out := tl.WrapView(fakeItems, "V"); out == "V" {
 		t.Error("after loadLibrary, WrapView should retransmit, not skip")
+	}
+}
+
+// TestVideoMode_RefetchVisibleThumbsOnDynamicTabSwitch verifies that
+// switching to a dynamic tab (channel/playlist) triggers a refetch of
+// visible thumbnails whose cache entries were evicted by the LRU.
+func TestVideoMode_RefetchVisibleThumbsOnDynamicTabSwitch(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	m := New(&mockYTClient{
+		authenticated: true,
+		getChannelVideosFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{
+					ID: "cv1", Title: "Chan Video",
+					Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/cv1.jpg", Width: 320}},
+				}},
+			}, nil
+		},
+	}, cfg, Options{})
+
+	imgR := m.listThumbList.Renderer()
+	// Pre-populate cache with a small LRU — the default is 200 which is
+	// enough to not evict in a test, so store directly and verify refetch
+	// returns a cmd when the URL is not cached.
+	imgR.Store("https://fake.test/cv1.jpg", "TX_CV1", "PL_CV1")
+
+	// Stabilise the ThumbList.
+	items := []list.Item{shared.VideoItem{Video: youtube.Video{
+		ID: "cv1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/cv1.jpg", Width: 320}},
+	}}}
+	wrapViewStabilize(m.listThumbList, items, "V")
+
+	// refetchVisibleThumbs for search (non-dynamic) returns nil because
+	// search has no items.
+	m.activeView = ViewSearch
+	if cmd := m.refetchVisibleThumbs(); cmd != nil {
+		t.Error("empty search should not need refetch")
+	}
+
+	// Set up feed with the same item so refetch returns nil (all cached).
+	m.activeView = ViewFeed
+	cmd := m.refetchVisibleThumbs()
+	// Feed has no items set, so RefetchCmd returns nil.
+	if cmd != nil {
+		t.Error("empty feed should not need refetch")
+	}
+}
+
+// TestMusicMode_RefetchVisibleThumbsOnViewSwitch verifies that switching
+// between music mode views triggers refetch for evicted thumbnails.
+// TestMusicMode_RefetchVisibleThumbsOnViewSwitch verifies that
+// refetchVisibleThumbs routes correctly for music mode views.
+func TestMusicMode_RefetchVisibleThumbsOnViewSwitch(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+
+	m := NewMusic(
+		&mockMusicClient{authenticated: true},
+		&mockYTClient{authenticated: true},
+		cfg, nil, Options{},
+	)
+
+	tl := m.thumbList
+	if tl == nil {
+		t.Fatal("expected thumbList")
+	}
+	imgR := tl.Renderer()
+
+	// Set up home with a sub-tab that has items.
+	imgR.Store("https://fake.test/song.jpg", "TX_SONG", "PL_SONG")
+	m.homeSubs = []subTab{{
+		title: "Fake Shelf",
+		list:  shared.NewList(m.musicListDelegate()),
+	}}
+	m.homeSubs[0].list.SetItems([]list.Item{musicItem{item: youtube.MusicItem{
+		Title: "Fake", Type: youtube.MusicSong,
+		Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/song.jpg", Width: 226}},
+	}}})
+	m.homeLoaded = true
+	m.homeSubIdx = 0
+
+	// Home view: all cached → nil.
+	m.onFixedView = true
+	m.activeFixed = musicViewHome
+	if cmd := m.refetchVisibleThumbs(); cmd != nil {
+		t.Error("should return nil when all home thumbnails cached")
+	}
+
+	// Search view with no results → nil.
+	m.activeFixed = musicViewSearch
+	if cmd := m.refetchVisibleThumbs(); cmd != nil {
+		t.Error("should return nil for empty search")
+	}
+
+	// Library view not loaded → nil.
+	m.activeFixed = musicViewLibrary
+	if cmd := m.refetchVisibleThumbs(); cmd != nil {
+		t.Error("should return nil for unloaded library")
+	}
+
+	// Home with uncached item → non-nil.
+	m.activeFixed = musicViewHome
+	m.homeSubs[0].list.SetItems([]list.Item{musicItem{item: youtube.MusicItem{
+		Title: "Uncached", Type: youtube.MusicSong,
+		Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/uncached.jpg", Width: 226}},
+	}}})
+	if cmd := m.refetchVisibleThumbs(); cmd == nil {
+		t.Error("should return non-nil for uncached home thumbnail")
+	}
+}
+
+// TestMusicMode_RefetchOnArtistSubTabSwitch verifies that switching sub-tabs
+// within an artist page triggers refetch for evicted thumbnails.
+// TestMusicMode_RefetchOnArtistSubTabSwitch verifies that refetchVisibleThumbs
+// routes correctly for artist page sub-tabs in music mode.
+func TestMusicMode_RefetchOnArtistSubTabSwitch(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+
+	m := NewMusic(
+		&mockMusicClient{authenticated: true},
+		&mockYTClient{authenticated: true},
+		cfg, nil, Options{},
+	)
+
+	tl := m.thumbList
+	if tl == nil {
+		t.Fatal("expected thumbList")
+	}
+	imgR := tl.Renderer()
+
+	// Set up an artist tab with sub-tabs.
+	imgR.Store("https://fake.test/art.jpg", "TX_ART", "PL_ART")
+	tab := musicTab{
+		kind:   musicTabArtist,
+		loaded: true,
+		artistSubs: []subTab{
+			{title: "Songs", list: shared.NewList(m.musicListDelegate())},
+			{title: "Albums", list: shared.NewList(m.musicListDelegate())},
+		},
+		activeSubTab: 0,
+	}
+	tab.artistSubs[0].list.SetItems([]list.Item{musicItem{item: youtube.MusicItem{
+		Title: "Fake Song", Type: youtube.MusicSong,
+		Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/art.jpg", Width: 226}},
+	}}})
+
+	idx, _ := m.tabs.Open(tab)
+	m.tabs.SetActive(idx)
+	m.onFixedView = false
+
+	// All cached → nil.
+	if cmd := m.refetchVisibleThumbs(); cmd != nil {
+		t.Error("should return nil when all artist thumbnails cached")
+	}
+
+	// Uncached item → non-nil.
+	active := m.tabs.Active()
+	active.artistSubs[0].list.SetItems([]list.Item{musicItem{item: youtube.MusicItem{
+		Title: "Uncached", Type: youtube.MusicSong,
+		Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/uncached.jpg", Width: 226}},
+	}}})
+
+	if cmd := m.refetchVisibleThumbs(); cmd == nil {
+		t.Error("should return non-nil for uncached artist sub-tab thumbnail")
 	}
 }

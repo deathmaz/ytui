@@ -179,3 +179,57 @@ func TestDiacriticsTable(t *testing.T) {
 		seen[d] = i
 	}
 }
+
+func TestResizeToFit(t *testing.T) {
+	t.Run("downscale", func(t *testing.T) {
+		img := image.NewRGBA(image.Rect(0, 0, 1280, 720))
+		out := resizeToFit(img, 320, 160)
+		b := out.Bounds()
+		// 1280×720 scaled to fit 320×160 → limited by height: 284×160
+		if b.Dx() > 320 || b.Dy() > 160 {
+			t.Errorf("expected within 320×160, got %d×%d", b.Dx(), b.Dy())
+		}
+		if b.Dx() < 200 || b.Dy() < 100 {
+			t.Errorf("downscaled too aggressively: %d×%d", b.Dx(), b.Dy())
+		}
+	})
+
+	t.Run("no upscale", func(t *testing.T) {
+		img := image.NewRGBA(image.Rect(0, 0, 50, 30))
+		out := resizeToFit(img, 320, 160)
+		if out != img {
+			t.Error("small image should be returned unchanged")
+		}
+	})
+
+	t.Run("aspect ratio preserved", func(t *testing.T) {
+		img := image.NewRGBA(image.Rect(0, 0, 1280, 720))
+		out := resizeToFit(img, 320, 160)
+		b := out.Bounds()
+		srcRatio := 1280.0 / 720.0
+		dstRatio := float64(b.Dx()) / float64(b.Dy())
+		if diff := srcRatio - dstRatio; diff > 0.05 || diff < -0.05 {
+			t.Errorf("aspect ratio not preserved: src=%.2f dst=%.2f", srcRatio, dstRatio)
+		}
+	})
+}
+
+func TestEncodeForKitty_DownscalesLargeImage(t *testing.T) {
+	// 1280×720 image should produce a transmitStr well under 200 KB
+	// (without resize it would be ~2.8 MB).
+	img := image.NewRGBA(image.Rect(0, 0, 1280, 720))
+	for y := 0; y < 720; y++ {
+		for x := 0; x < 1280; x++ {
+			img.SetRGBA(x, y, color.RGBA{
+				uint8(x % 256), uint8(y % 256), 128, 255,
+			})
+		}
+	}
+	tx, _, err := EncodeForKitty(img, 20, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tx) > 200_000 {
+		t.Errorf("transmitStr too large after resize: %d bytes (want < 200000)", len(tx))
+	}
+}

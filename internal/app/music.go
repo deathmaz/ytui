@@ -169,14 +169,14 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 	h := help.New()
 	h.ShortSeparator = "  "
 
-	var thumbList *shared.ThumbList
-	if cfg.Thumbnails.Enabled {
-		thumbList = shared.NewThumbList(ytimage.NewRenderer(), musicThumbURL)
-	}
-
 	thumbH := cfg.Thumbnails.Height
 	if thumbH <= 0 {
 		thumbH = 5
+	}
+
+	var thumbList *shared.ThumbList
+	if cfg.Thumbnails.Enabled {
+		thumbList = shared.NewThumbList(ytimage.NewRenderer(), musicThumbURL, thumbH)
 	}
 
 	s := search.New(newMusicSearchConfig(client, thumbList, thumbH))
@@ -299,7 +299,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.onFixedView = true
 				m.activeFixed = musicViewSearch
 				m.search.Focus()
-				return m, m.search.Init()
+				return m, tea.Batch(m.search.Init(), m.refetchVisibleThumbs())
 			}
 		}
 
@@ -308,7 +308,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Back):
 			if !m.onFixedView {
 				m.closeActiveTab()
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 		case key.Matches(msg, m.keys.Play):
 			return m, m.playSelected()
@@ -326,17 +326,17 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeFixed = musicFixedView(idx)
 				switch m.activeFixed {
 				case musicViewHome:
-					return m, m.loadHome()
+					return m, tea.Batch(m.loadHome(), m.refetchVisibleThumbs())
 				case musicViewLibrary:
-					return m, m.loadLibrary()
+					return m, tea.Batch(m.loadLibrary(), m.refetchVisibleThumbs())
 				}
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 			tabIdx := idx - 3
 			if tabIdx < m.tabs.Len() {
 				m.onFixedView = false
 				m.tabs.SetActive(tabIdx)
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 		}
 
@@ -348,14 +348,14 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						tab.activeSubTab++
 						m.resizeViews()
 					}
-					return m, nil
+					return m, m.refetchVisibleThumbs()
 				}
 				if key.Matches(msg, m.keys.PrevTab) {
 					if tab.activeSubTab > 0 {
 						tab.activeSubTab--
 						m.resizeViews()
 					}
-					return m, nil
+					return m, m.refetchVisibleThumbs()
 				}
 				if key.Matches(msg, m.keys.LoadMore) {
 					return m, m.loadMoreForSubTab(tab)
@@ -369,13 +369,13 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.homeSubIdx < len(m.homeSubs)-1 {
 					m.homeSubIdx++
 				}
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 			if key.Matches(msg, m.keys.PrevTab) {
 				if m.homeSubIdx > 0 {
 					m.homeSubIdx--
 				}
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 		}
 		if m.onFixedView && m.activeFixed == musicViewLibrary && m.libraryLoaded {
@@ -383,13 +383,13 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.librarySubIdx < len(m.librarySubs)-1 {
 					m.librarySubIdx++
 				}
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 			if key.Matches(msg, m.keys.PrevTab) {
 				if m.librarySubIdx > 0 {
 					m.librarySubIdx--
 				}
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 			if key.Matches(msg, m.keys.LoadMore) {
 				return m, m.loadMoreLibrary()
@@ -785,6 +785,35 @@ func (m *MusicModel) loadMoreForSubTab(tab *musicTab) tea.Cmd {
 			return musicMoreLoadedMsg{SubTabIdx: subIdx, Items: items, Err: err}
 		},
 	)
+}
+
+// refetchVisibleThumbs returns a cmd that re-fetches thumbnails for visible
+// items whose cache entries were evicted by the LRU.
+func (m *MusicModel) refetchVisibleThumbs() tea.Cmd {
+	if m.thumbList == nil {
+		return nil
+	}
+	if m.onFixedView {
+		switch m.activeFixed {
+		case musicViewHome:
+			if m.homeLoaded && m.homeSubIdx < len(m.homeSubs) {
+				return m.thumbList.RefetchCmd(m.homeSubs[m.homeSubIdx].list)
+			}
+		case musicViewLibrary:
+			if m.libraryLoaded && m.librarySubIdx < len(m.librarySubs) {
+				return m.thumbList.RefetchCmd(m.librarySubs[m.librarySubIdx].list)
+			}
+		case musicViewSearch:
+			return m.search.RefetchThumbs()
+		}
+		return nil
+	}
+	if tab := m.tabs.Active(); tab != nil && tab.kind == musicTabArtist && tab.loaded {
+		if tab.activeSubTab < len(tab.artistSubs) {
+			return m.thumbList.RefetchCmd(tab.artistSubs[tab.activeSubTab].list)
+		}
+	}
+	return nil
 }
 
 func (m *MusicModel) activeTab() *musicTab {

@@ -109,6 +109,12 @@ func (m *Model) loadMore() tea.Cmd {
 	}
 }
 
+// RefetchThumbs returns a cmd that re-fetches thumbnails for visible items
+// whose cache entries were evicted by the LRU.
+func (m Model) RefetchThumbs() tea.Cmd {
+	return m.thumbList.RefetchCmd(m.list)
+}
+
 // SelectedVideo returns the currently selected video.
 func (m Model) SelectedVideo() (youtube.Video, bool) {
 	if item, ok := m.list.SelectedItem().(shared.VideoItem); ok {

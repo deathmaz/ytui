@@ -151,6 +151,12 @@ func (m Model) SelectedItem() list.Item {
 	return m.results.SelectedItem()
 }
 
+// RefetchThumbs returns a cmd that re-fetches thumbnails for visible items
+// whose cache entries were evicted by the LRU.
+func (m Model) RefetchThumbs() tea.Cmd {
+	return m.thumbList.RefetchCmd(m.results)
+}
+
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
 	if m.focused == focusInput {

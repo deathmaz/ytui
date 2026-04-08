@@ -147,13 +147,27 @@ func newPlaylistListSetup(videoThumbList *shared.ThumbList, cfg config.Thumbnail
 	if imgR == nil {
 		imgR = ytimage.NewRenderer()
 	}
-	plThumb := shared.NewThumbList(imgR, shared.PlaylistThumbURL)
+	plThumb := shared.NewThumbList(imgR, shared.PlaylistThumbURL, h)
 	plDelegate := shared.NewThumbDelegate(imgR, h, shared.PlaylistThumbURL, shared.RenderPlaylistText)
 	return plDelegate, plThumb
 }
 
 func (m *Model) Channel() *youtube.Channel {
 	return &m.channel
+}
+
+// RefetchThumbs returns a cmd that re-fetches thumbnails for the active
+// sub-tab's visible items whose cache entries were evicted by the LRU.
+func (m *Model) RefetchThumbs() tea.Cmd {
+	switch m.activeTab {
+	case tabVideos:
+		return m.thumbList.RefetchCmd(m.videoList)
+	case tabPlaylists:
+		return m.plThumbList.RefetchCmd(m.playlistList)
+	case tabStreams:
+		return m.thumbList.RefetchCmd(m.streamList)
+	}
+	return nil
 }
 
 func (m *Model) SetSize(w, h int) {
@@ -573,13 +587,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // Cross-ThumbList invalidation (videos ↔ playlists) is handled automatically
 // by the global DeleteAll generation counter — no manual Invalidate needed here.
 func (m *Model) onTabSwitch() tea.Cmd {
+	// Re-fetch any thumbnails evicted by LRU while this sub-tab was inactive.
+	refetch := m.RefetchThumbs()
 	switch m.activeTab {
 	case tabPlaylists:
-		return m.loadPlaylists()
+		return tea.Batch(m.loadPlaylists(), refetch)
 	case tabPosts:
 		return m.loadPosts()
 	case tabStreams:
-		return m.loadStreams()
+		return tea.Batch(m.loadStreams(), refetch)
+	case tabVideos:
+		return refetch
 	}
 	return nil
 }

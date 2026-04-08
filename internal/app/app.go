@@ -147,7 +147,7 @@ func newVideoListSetup(cfg *config.Config) (*shared.ThumbList, list.ItemDelegate
 		thumbH = 5
 	}
 	imgR := ytimage.NewRenderer()
-	thumbList := shared.NewThumbList(imgR, shared.VideoThumbURL)
+	thumbList := shared.NewThumbList(imgR, shared.VideoThumbURL, thumbH)
 	delegate := shared.NewThumbDelegate(imgR, thumbH, shared.VideoThumbURL, shared.RenderVideoText)
 	return thumbList, delegate
 }
@@ -215,7 +215,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case KeySearch:
 				m.switchTo(ViewSearch)
 				m.search.Focus()
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 		}
 
@@ -226,7 +226,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.tabs.Len() == 0 {
 					m.activeView = ViewSearch
 				}
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 		}
 
@@ -234,7 +234,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 			case key.Matches(msg, m.keys.Feed):
 				m.switchTo(ViewFeed)
-				return m, m.feed.Load(false)
+				return m, tea.Batch(m.feed.Load(false), m.refetchVisibleThumbs())
 			case key.Matches(msg, m.keys.Subs):
 				m.switchTo(ViewSubs)
 				return m, m.subs.Load(false)
@@ -262,7 +262,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if idx < m.tabs.Len() {
 				m.activeView = ViewDynamicTab
 				m.tabs.SetActive(idx)
-				return m, nil
+				return m, m.refetchVisibleThumbs()
 			}
 		}
 
@@ -573,6 +573,30 @@ func (m *Model) closeActiveTab() {
 
 func (m *Model) switchTo(v View) {
 	m.activeView = v
+}
+
+// refetchVisibleThumbs returns a cmd that re-fetches thumbnails for visible
+// items whose cache entries were evicted by the LRU. Called on view/tab switch.
+func (m *Model) refetchVisibleThumbs() tea.Cmd {
+	if m.listThumbList == nil {
+		return nil
+	}
+	switch m.activeView {
+	case ViewSearch:
+		return m.search.RefetchThumbs()
+	case ViewFeed:
+		return m.feed.RefetchThumbs()
+	case ViewDynamicTab:
+		if tab := m.tabs.Active(); tab != nil {
+			switch tab.kind {
+			case tabChannel:
+				return tab.channel.RefetchThumbs()
+			case tabPlaylist:
+				return tab.playlist.RefetchThumbs()
+			}
+		}
+	}
+	return nil
 }
 
 func (m *Model) selectedVideo() *youtube.Video {

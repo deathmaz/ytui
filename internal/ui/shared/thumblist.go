@@ -58,16 +58,22 @@ func init() {
 type ThumbList struct {
 	imgR            *ytimage.Renderer
 	getURL          func(list.Item) string
+	thumbRows       int    // row height used for fetch/encode
 	lastFingerprint string // cached-URL fingerprint from previous WrapView
 	lastDeleteGen   uint64 // globalDeleteGen value when we last transmitted
 	repeatCount     int    // frames left to keep retransmitting after a change
 }
 
-// NewThumbList creates a new ThumbList with the given renderer and URL extractor.
-func NewThumbList(imgR *ytimage.Renderer, getURL func(list.Item) string) *ThumbList {
+// NewThumbList creates a new ThumbList with the given renderer, URL extractor,
+// and thumbnail row height (used for fetch/encode dimensions).
+func NewThumbList(imgR *ytimage.Renderer, getURL func(list.Item) string, thumbRows int) *ThumbList {
+	if thumbRows <= 0 {
+		thumbRows = 5
+	}
 	return &ThumbList{
-		imgR:   imgR,
-		getURL: getURL,
+		imgR:      imgR,
+		getURL:    getURL,
+		thumbRows: thumbRows,
 	}
 }
 
@@ -136,15 +142,13 @@ func (t *ThumbList) WrapView(items []list.Item, view string) string {
 	}
 	var fp strings.Builder
 	var cached []cachedEntry
-	nURLs := 0
-	seen := make(map[string]bool)
+	var seenURLs []string
 	for _, item := range items {
 		url := t.getURL(item)
-		if url == "" || seen[url] {
+		if url == "" || sliceContains(seenURLs, url) {
 			continue
 		}
-		seen[url] = true
-		nURLs++
+		seenURLs = append(seenURLs, url)
 		transmitStr, _ := t.imgR.Get(url)
 		if transmitStr != "" {
 			fp.WriteString(url)
@@ -159,11 +163,11 @@ func (t *ThumbList) WrapView(items []list.Item, view string) string {
 		// loading spinner), send a bare DeleteAll to purge old images
 		// from Kitty that belong to the previous view.
 		if t.lastDeleteGen == 0 && t.lastFingerprint == "" {
-			thumbLog("[%p] DELETE_STALE  items=%d", t, nURLs)
+			thumbLog("[%p] DELETE_STALE  items=%d", t, len(seenURLs))
 			t.lastDeleteGen = globalDeleteGen.Add(1)
 			return ytimage.DeleteAll() + view
 		}
-		thumbLog("[%p] SKIP (no cached)  items=%d", t, nURLs)
+		thumbLog("[%p] SKIP (no cached)  items=%d", t, len(seenURLs))
 		return view
 	}
 
@@ -177,7 +181,7 @@ func (t *ThumbList) WrapView(items []list.Item, view string) string {
 	}
 	if t.repeatCount <= 0 {
 		thumbLog("[%p] SKIP (stable)  gen=%d  cached=%d/%d",
-			t, gen, len(cached), nURLs)
+			t, gen, len(cached), len(seenURLs))
 		return view
 	}
 	t.repeatCount--
@@ -223,6 +227,42 @@ func (t *ThumbList) Invalidate() {
 	t.lastFingerprint = ""
 	t.lastDeleteGen = 0 // mismatch any gen ≥ 1 → forces retransmit
 	t.repeatCount = 0
+}
+
+func sliceContains(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// RefetchCmd returns a tea.Cmd that re-fetches thumbnails for visible items
+// whose cache entries were evicted by the LRU. Call this when switching to
+// a view whose thumbnails may have been evicted while it was inactive.
+func (t *ThumbList) RefetchCmd(l list.Model) tea.Cmd {
+	if t == nil || t.imgR == nil {
+		return nil
+	}
+	items := VisibleItems(l)
+	thumbCols := t.thumbRows * 4
+	thumbRows := t.thumbRows
+	var cmds []tea.Cmd
+	for _, item := range items {
+		url := t.getURL(item)
+		if url == "" {
+			continue
+		}
+		cmd := t.imgR.FetchCmd(url, thumbCols, thumbRows)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 // TriggerFetch forwards msg to a list so that the delegate's Update fires
@@ -276,6 +316,23 @@ func (d thumbDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
 	items := m.Items()
 	if len(items) == 0 {
 		return nil
+	}
+
+	// Only fetch thumbnails for visible items plus a ±1 page buffer.
+	// Before the first resize PerPage may be 0; fall back to all items.
+	p := m.Paginator
+	if p.PerPage > 0 {
+		start := p.Page*p.PerPage - p.PerPage
+		if start < 0 {
+			start = 0
+		}
+		end := p.Page*p.PerPage + p.PerPage*2
+		if end > len(items) {
+			end = len(items)
+		}
+		if start < len(items) {
+			items = items[start:end]
+		}
 	}
 
 	thumbCols := d.thumbRows * 4

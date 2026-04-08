@@ -1,6 +1,7 @@
 package image
 
 import (
+	"container/list"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,13 +15,25 @@ type ThumbnailLoadedMsg struct {
 	Err         error
 }
 
+const defaultMaxCache = 200
+
 // Renderer manages thumbnail fetching, encoding, and caching.
+// The cache is LRU-bounded to limit memory usage.
 type Renderer struct {
-	mu        sync.RWMutex
-	cache     map[string]cachedThumb
-	inflight  map[string]bool // URLs currently being fetched
-	requested map[string]bool // all URLs ever passed to FetchCmd (for testing)
-	sem       chan struct{}   // concurrency limiter
+	mu       sync.Mutex
+	cache    map[string]*list.Element
+	order    *list.List
+	maxSize  int
+	inflight map[string]bool // URLs currently being fetched
+	sem      chan struct{}    // concurrency limiter
+
+	// Test-only: tracks all URLs ever passed to FetchCmd.
+	requested map[string]bool
+}
+
+type lruEntry struct {
+	url   string
+	thumb cachedThumb
 }
 
 type cachedThumb struct {
@@ -28,30 +41,68 @@ type cachedThumb struct {
 	placeholder string
 }
 
-// NewRenderer creates a new thumbnail renderer.
+// NewRenderer creates a new thumbnail renderer with the default cache size.
 func NewRenderer() *Renderer {
+	return NewRendererWithMax(defaultMaxCache)
+}
+
+// NewRendererWithMax creates a renderer with a custom cache capacity.
+func NewRendererWithMax(maxEntries int) *Renderer {
+	if maxEntries < 1 {
+		maxEntries = 1
+	}
 	return &Renderer{
-		cache:     make(map[string]cachedThumb),
+		cache:     make(map[string]*list.Element),
+		order:     list.New(),
+		maxSize:   maxEntries,
 		inflight:  make(map[string]bool),
 		requested: make(map[string]bool),
-		sem:       make(chan struct{}, 3), // max 3 concurrent fetches
+		sem:       make(chan struct{}, 3),
 	}
 }
 
 // Get returns the cached thumbnail, or empty strings if not cached.
+// Promotes the entry to the front of the LRU list.
 func (r *Renderer) Get(url string) (transmitStr, placeholder string) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	c := r.cache[url]
-	return c.transmitStr, c.placeholder
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if elem, ok := r.cache[url]; ok {
+		r.order.MoveToFront(elem)
+		e := elem.Value.(*lruEntry)
+		return e.thumb.transmitStr, e.thumb.placeholder
+	}
+	return "", ""
 }
 
-// Store caches thumbnail data.
+// Store caches thumbnail data, evicting the oldest entry if at capacity.
 func (r *Renderer) Store(url, transmitStr, placeholder string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.cache[url] = cachedThumb{transmitStr: transmitStr, placeholder: placeholder}
+	r.storeLocked(url, transmitStr, placeholder)
 	delete(r.inflight, url)
+}
+
+func (r *Renderer) storeLocked(url, transmitStr, placeholder string) {
+	if elem, ok := r.cache[url]; ok {
+		r.order.MoveToFront(elem)
+		elem.Value.(*lruEntry).thumb = cachedThumb{transmitStr, placeholder}
+		return
+	}
+	entry := &lruEntry{url: url, thumb: cachedThumb{transmitStr, placeholder}}
+	elem := r.order.PushFront(entry)
+	r.cache[url] = elem
+	if r.order.Len() > r.maxSize {
+		r.evictLocked()
+	}
+}
+
+func (r *Renderer) evictLocked() {
+	back := r.order.Back()
+	if back == nil {
+		return
+	}
+	r.order.Remove(back)
+	delete(r.cache, back.Value.(*lruEntry).url)
 }
 
 // ClearInflight removes a URL from the in-flight set without caching,
@@ -73,15 +124,15 @@ func (r *Renderer) HandleLoaded(msg ThumbnailLoadedMsg) bool {
 	}
 	delete(r.inflight, msg.URL)
 	if msg.Err == nil && msg.Placeholder != "" {
-		r.cache[msg.URL] = cachedThumb{transmitStr: msg.TransmitStr, placeholder: msg.Placeholder}
+		r.storeLocked(msg.URL, msg.TransmitStr, msg.Placeholder)
 	}
 	return true
 }
 
 // WasRequested reports whether FetchCmd was ever called for a URL.
 func (r *Renderer) WasRequested(url string) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.requested[url]
 }
 

@@ -8,6 +8,8 @@ import (
 	"image/png"
 	"strings"
 	"sync/atomic"
+
+	"golang.org/x/image/draw"
 )
 
 // Row/column diacritics from Kitty's specification.
@@ -29,11 +31,18 @@ func init() {
 }
 
 // EncodeForKitty encodes an image for the Kitty Unicode placeholder protocol.
+// The image is downscaled to fit the display grid before encoding to reduce
+// memory usage. Kitty handles final pixel-perfect scaling via the virtual
+// placement, so the source just needs to be reasonably sized.
 // Returns:
 //   - transmitStr: escape sequences to transmit data + create virtual placement (use once)
 //   - placeholderStr: U+10EEEE grid with diacritics (use in every View)
 func EncodeForKitty(img image.Image, cols, rows int) (transmitStr, placeholderStr string, err error) {
 	id := nextImageID.Add(1)
+
+	// Downscale to fit the display grid. Cell size is assumed ~8×16 px;
+	// double for HiDPI sharpness.
+	img = resizeToFit(img, cols*16, rows*32)
 
 	var pngBuf bytes.Buffer
 	if err := png.Encode(&pngBuf, img); err != nil {
@@ -105,6 +114,31 @@ func buildPlaceholders(id uint32, cols, rows int) string {
 		}
 	}
 	return b.String()
+}
+
+// resizeToFit scales img down to fit within maxW×maxH, preserving aspect
+// ratio. Returns the original image unchanged if it already fits.
+func resizeToFit(img image.Image, maxW, maxH int) image.Image {
+	b := img.Bounds()
+	srcW, srcH := b.Dx(), b.Dy()
+	if srcW <= maxW && srcH <= maxH {
+		return img
+	}
+	scale := float64(maxW) / float64(srcW)
+	if s := float64(maxH) / float64(srcH); s < scale {
+		scale = s
+	}
+	dstW := int(float64(srcW) * scale)
+	dstH := int(float64(srcH) * scale)
+	if dstW < 1 {
+		dstW = 1
+	}
+	if dstH < 1 {
+		dstH = 1
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, dstW, dstH))
+	draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Over, nil)
+	return dst
 }
 
 // DeleteAll returns an escape sequence that deletes all Kitty images.

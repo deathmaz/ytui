@@ -31,7 +31,7 @@ func stabilize(tl *ThumbList, items []list.Item, view string) {
 
 func TestWrapView_TransmitsOnFirstCall(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TRANSMIT_A", "PLACE_A")
 	imgR.Store("http://thumb/b", "TRANSMIT_B", "PLACE_B")
@@ -53,7 +53,7 @@ func TestWrapView_TransmitsOnFirstCall(t *testing.T) {
 
 func TestWrapView_RepeatsOnceThenSkips(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
 
@@ -82,7 +82,7 @@ func TestWrapView_RepeatsOnceThenSkips(t *testing.T) {
 
 func TestWrapView_RetransmitsWhenNewImageLoads(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
 
@@ -109,7 +109,7 @@ func TestWrapView_RetransmitsWhenNewImageLoads(t *testing.T) {
 
 func TestWrapView_RetransmitsOnPageChange(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
 	imgR.Store("http://thumb/x", "TX_X", "PL_X")
@@ -129,7 +129,7 @@ func TestWrapView_RetransmitsOnPageChange(t *testing.T) {
 
 func TestWrapView_Invalidate(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
 
@@ -151,7 +151,7 @@ func TestWrapView_Invalidate(t *testing.T) {
 
 func TestWrapView_InvalidatePurgesOldImagesBeforeCacheReady(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
 
@@ -170,7 +170,7 @@ func TestWrapView_InvalidatePurgesOldImagesBeforeCacheReady(t *testing.T) {
 
 func TestWrapView_DeduplicatesSharedURLs(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
 
@@ -184,8 +184,8 @@ func TestWrapView_DeduplicatesSharedURLs(t *testing.T) {
 
 func TestWrapView_CrossThumbListDeleteAll(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tlA := NewThumbList(imgR, VideoThumbURL)
-	tlB := NewThumbList(imgR, VideoThumbURL)
+	tlA := NewThumbList(imgR, VideoThumbURL, 5)
+	tlB := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
 	imgR.Store("http://thumb/x", "TX_X", "PL_X")
@@ -214,7 +214,7 @@ func TestWrapView_CrossThumbListDeleteAll(t *testing.T) {
 // uncached items, the bare DeleteAll is sent once, not on every frame.
 func TestWrapView_DeleteStaleSentOnlyOnce(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
 	stabilize(tl, testItems("http://thumb/a"), "V")
@@ -244,7 +244,7 @@ func TestWrapView_DeleteStaleSentOnlyOnce(t *testing.T) {
 // (DeleteAll + all cached so far) followed by a repeat frame.
 func TestWrapView_IncrementalLoading(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	items := testItems("http://thumb/a", "http://thumb/b", "http://thumb/c", "http://thumb/d")
 	deleteAll := ytimage.DeleteAll()
@@ -303,7 +303,7 @@ func TestWrapView_IncrementalLoading(t *testing.T) {
 // the repeat for stale data).
 func TestWrapView_FingerprintChangeDuringRepeat(t *testing.T) {
 	imgR := ytimage.NewRenderer()
-	tl := NewThumbList(imgR, VideoThumbURL)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
 	imgR.Store("http://thumb/x", "TX_X", "PL_X")
@@ -346,6 +346,52 @@ func TestWrapView_NilRenderer(t *testing.T) {
 	out := tl.WrapView(nil, "VIEW")
 	if out != "VIEW" {
 		t.Errorf("nil renderer should return view unchanged, got %q", out)
+	}
+}
+
+// TestRefetchCmd_NilWhenAllCached verifies that RefetchCmd returns nil
+// when all visible items are already in the cache.
+func TestRefetchCmd_NilWhenAllCached(t *testing.T) {
+	imgR := ytimage.NewRenderer()
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
+
+	imgR.Store("http://thumb/a", "TX_A", "PL_A")
+
+	l := NewList(VideoDelegate{})
+	l.SetItems(testItems("http://thumb/a"))
+
+	cmd := tl.RefetchCmd(l)
+	if cmd != nil {
+		t.Error("RefetchCmd should return nil when all visible items are cached")
+	}
+}
+
+// TestRefetchCmd_ReturnsCmdWhenEvicted verifies that RefetchCmd returns a
+// non-nil command when a visible item's cache entry was evicted by the LRU.
+func TestRefetchCmd_ReturnsCmdWhenEvicted(t *testing.T) {
+	imgR := ytimage.NewRendererWithMax(2)
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
+
+	imgR.Store("http://thumb/a", "TX_A", "PL_A")
+	imgR.Store("http://thumb/b", "TX_B", "PL_B")
+	imgR.Store("http://thumb/c", "TX_C", "PL_C") // evicts "a"
+
+	l := NewList(VideoDelegate{})
+	l.SetItems(testItems("http://thumb/a"))
+
+	cmd := tl.RefetchCmd(l)
+	if cmd == nil {
+		t.Error("RefetchCmd should return non-nil for evicted URL")
+	}
+}
+
+// TestRefetchCmd_NilSafe verifies that RefetchCmd doesn't panic on nil.
+func TestRefetchCmd_NilSafe(t *testing.T) {
+	var tl *ThumbList
+	l := NewList(VideoDelegate{})
+	cmd := tl.RefetchCmd(l)
+	if cmd != nil {
+		t.Error("nil ThumbList RefetchCmd should return nil")
 	}
 }
 

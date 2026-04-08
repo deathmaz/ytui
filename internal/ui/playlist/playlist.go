@@ -56,6 +56,12 @@ func (m *Model) SetSize(w, h int) {
 	m.list.SetSize(w, h)
 }
 
+// RefetchThumbs returns a cmd that re-fetches thumbnails for visible items
+// whose cache entries were evicted by the LRU.
+func (m *Model) RefetchThumbs() tea.Cmd {
+	return m.thumbList.RefetchCmd(m.list)
+}
+
 // SelectedVideo returns the currently selected video, if any.
 func (m *Model) SelectedVideo() *youtube.Video {
 	if item, ok := m.list.SelectedItem().(shared.VideoItem); ok {
