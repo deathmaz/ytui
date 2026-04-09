@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/config"
 	"github.com/deathmaz/ytui/internal/download"
+	"github.com/deathmaz/ytui/internal/state"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/ui/channel"
@@ -61,14 +62,15 @@ const (
 
 // dynamicTab holds the state for a single dynamic tab (video detail or channel).
 type dynamicTab struct {
-	kind    tabKind
-	id      string // videoID or channelID — used for deduplication
-	title   string
-	detail   detail.Model    // video tab
-	formats  []player.Format // cached quality list (video tab only)
-	channel  channel.Model   // channel tab
-	playlist playlist.Model  // playlist tab
-	post     post.Model      // post tab
+	kind      tabKind
+	id        string // videoID or channelID — used for deduplication
+	title     string
+	needsLoad bool            // true for restored tabs that haven't loaded yet
+	detail    detail.Model    // video tab
+	formats   []player.Format // cached quality list (video tab only)
+	channel   channel.Model   // channel tab
+	playlist  playlist.Model  // playlist tab
+	post      post.Model      // post tab
 }
 
 // Model is the root Bubble Tea model.
@@ -92,6 +94,7 @@ type Model struct {
 
 	pendingVideoURL string
 	pendingOpen     *youtube.ParsedURL
+	pendingRestore  []state.TabEntry
 	startupWarning  string
 	status          StatusManager
 	downloading     bool
@@ -131,6 +134,7 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 		cfg:         cfg,
 		tabs:           NewTabSet[dynamicTab](maxDynamicTabs, func(t *dynamicTab) string { return t.id }),
 		pendingOpen:    opts.OpenURL,
+		pendingRestore: loadSavedTabs(cfg, "video"),
 		startupWarning: opts.Warning,
 	}
 }
@@ -156,9 +160,11 @@ func (m *Model) Init() tea.Cmd {
 	cmd := initCmds(
 		m.cfg.Auth.AuthOnStartup,
 		&m.pendingOpen,
+		&m.pendingRestore,
 		m.search.Init(),
 		m.authenticate,
 		m.openParsedURL,
+		m.restoreTabs,
 		m.search.Query(),
 		m.search.Refresh,
 	)
@@ -226,7 +232,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.tabs.Len() == 0 {
 					m.activeView = ViewSearch
 				}
-				return m, m.refetchVisibleThumbs()
+				return m, tea.Batch(m.loadRestoredTab(), m.refetchVisibleThumbs())
 			}
 		}
 
@@ -263,7 +269,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if idx < m.tabs.Len() {
 				m.activeView = ViewDynamicTab
 				m.tabs.SetActive(idx)
-				return m, m.refetchVisibleThumbs()
+				return m, tea.Batch(m.loadRestoredTab(), m.refetchVisibleThumbs())
 			}
 		}
 
@@ -325,6 +331,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AuthResult:
 		return m, HandleAuthResult(msg, &m.authenticating, &m.status, m.cfg.Auth.Browser,
 			&m.pendingOpen, m.openParsedURL,
+			&m.pendingRestore, m.restoreTabs,
 			func(httpClient *http.Client) error {
 				newClient, err := youtube.NewInnerTubeClient(httpClient)
 				if err != nil {
@@ -468,6 +475,7 @@ func (m *Model) openVideoTab(v *youtube.Video) tea.Cmd {
 	m.tabs.SetActive(idx)
 	m.activeView = ViewDynamicTab
 	m.listThumbList.Invalidate()
+	saveTabState(m.cfg, "video", m.tabEntries())
 	return m.tabs.Active().detail.LoadVideo(v.ID)
 }
 
@@ -496,6 +504,7 @@ func (m *Model) openChannelTab(ch youtube.Channel) tea.Cmd {
 	}
 	m.tabs.SetActive(idx)
 	m.activeView = ViewDynamicTab
+	saveTabState(m.cfg, "video", m.tabEntries())
 	return m.tabs.Active().channel.Load(ch)
 }
 
@@ -524,6 +533,7 @@ func (m *Model) openPlaylistTab(pl youtube.Playlist) tea.Cmd {
 	}
 	m.tabs.SetActive(idx)
 	m.activeView = ViewDynamicTab
+	saveTabState(m.cfg, "video", m.tabEntries())
 	return m.tabs.Active().playlist.Load(pl)
 }
 
@@ -574,6 +584,90 @@ func (m *Model) closeActiveTab() {
 		return
 	}
 	m.tabs.Close(m.tabs.ActiveIdx())
+	saveTabState(m.cfg, "video", m.tabEntries())
+}
+
+// tabEntries returns the current dynamic tabs as persistable entries.
+// Posts are excluded (they require DetailParams to reload).
+func (m *Model) tabEntries() []state.TabEntry {
+	var entries []state.TabEntry
+	for _, tab := range m.tabs.All() {
+		var kind string
+		switch tab.kind {
+		case tabVideo:
+			kind = state.KindVideo
+		case tabChannel:
+			kind = state.KindChannel
+		case tabPlaylist:
+			kind = state.KindPlaylist
+		default:
+			continue
+		}
+		entries = append(entries, state.TabEntry{Kind: kind, ID: tab.id, Title: tab.title})
+	}
+	return entries
+}
+
+// restoreTabs creates tab entries from a previous session without loading
+// their content. Loading is deferred until the user switches to the tab
+// (via loadRestoredTab), because messages from background loads would be
+// dropped while the user is on a different view.
+func (m *Model) restoreTabs(entries []state.TabEntry) tea.Cmd {
+	for _, e := range entries {
+		var kind tabKind
+		switch e.Kind {
+		case state.KindVideo:
+			kind = tabVideo
+		case state.KindChannel:
+			kind = tabChannel
+		case state.KindPlaylist:
+			kind = tabPlaylist
+		default:
+			continue
+		}
+		tab := dynamicTab{
+			kind:      kind,
+			id:        e.ID,
+			title:     e.Title,
+			needsLoad: true,
+		}
+		switch kind {
+		case tabVideo:
+			tab.detail = detail.New(m.ytClient, m.imgR)
+		case tabChannel:
+			tab.channel = channel.New(m.ytClient, m.listDelegate, m.listThumbList, m.cfg.Thumbnails)
+		case tabPlaylist:
+			tab.playlist = playlist.New(m.ytClient, m.listDelegate, m.listThumbList)
+		}
+		if _, err := m.tabs.Open(tab); err != nil {
+			break
+		}
+	}
+	m.activeView = ViewSearch
+	return nil
+}
+
+// loadRestoredTab triggers the initial load for the active tab if it was
+// restored from a previous session and hasn't loaded yet.
+func (m *Model) loadRestoredTab() tea.Cmd {
+	tab := m.tabs.Active()
+	if tab == nil || !tab.needsLoad {
+		return nil
+	}
+	tab.needsLoad = false
+	ch := m.contentHeight()
+	switch tab.kind {
+	case tabVideo:
+		tab.detail.SetSize(m.width, ch)
+		return tab.detail.LoadVideo(tab.id)
+	case tabChannel:
+		tab.channel.SetSize(m.width, ch)
+		return tab.channel.Load(youtube.Channel{ID: tab.id, Name: tab.title})
+	case tabPlaylist:
+		tab.playlist.SetSize(m.width, ch)
+		return tab.playlist.Load(youtube.Playlist{ID: tab.id, Title: tab.title})
+	}
+	return nil
 }
 
 func (m *Model) switchTo(v View) {

@@ -19,7 +19,8 @@ type Config struct {
 
 // GeneralConfig holds general settings.
 type GeneralConfig struct {
-	Mode string `toml:"mode"` // "video" (default) or "music"
+	Mode        string `toml:"mode"`         // "video" (default) or "music"
+	RestoreTabs bool   `toml:"restore_tabs"` // persist and restore open tabs across sessions
 }
 
 // PlayerConfig configures playback for video and music modes.

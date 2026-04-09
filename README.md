@@ -138,6 +138,7 @@ auth_on_startup = false            # auto-authenticate on launch (default: false
 
 [general]
 mode = "video"                     # "video" (default) or "music" for YouTube Music mode
+restore_tabs = false               # persist open tabs across sessions (default: false)
 
 [thumbnails]
 enabled = false                    # show thumbnails in lists (requires Kitty terminal)

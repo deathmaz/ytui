@@ -11,9 +11,13 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/deathmaz/ytui/internal/config"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
+	"github.com/deathmaz/ytui/internal/state"
+	"github.com/deathmaz/ytui/internal/ui/channel"
 	"github.com/deathmaz/ytui/internal/ui/shared"
+	"github.com/deathmaz/ytui/internal/ui/subs"
 	"github.com/deathmaz/ytui/internal/ui/urlinput"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -1801,5 +1805,676 @@ func TestVideoMode_SubsViewWrappedWithWrapView(t *testing.T) {
 	deleteAll := ytimage.DeleteAll()
 	if !strings.Contains(out, deleteAll) {
 		t.Error("subs view should include DeleteAll to clear stale list images")
+	}
+}
+
+// === Tab Persistence ===
+
+func restoreTabsConfig(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := testConfig()
+	cfg.General.RestoreTabs = true
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	return cfg
+}
+
+func TestVideoMode_TabPersistSaveAndRestore(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Video " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, chID, _ string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{}, nil
+		},
+	}
+
+	// Session 1: open a video tab and a channel tab
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "fake_vid_001", Title: "Fake Video"}})
+	time.Sleep(200 * time.Millisecond)
+	tm.Send(subs.ChannelSelectedMsg{Channel: youtube.Channel{ID: "UCfake123", Name: "Fake Channel"}})
+	time.Sleep(200 * time.Millisecond)
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.tabs.Len() != 2 {
+		t.Fatalf("expected 2 tabs, got %d", m.tabs.Len())
+	}
+
+	// Verify state file was written
+	saved, err := state.Load("video")
+	if err != nil {
+		t.Fatalf("state.Load error: %v", err)
+	}
+	if saved == nil {
+		t.Fatal("expected saved state, got nil")
+	}
+	if len(saved.Tabs) != 2 {
+		t.Fatalf("expected 2 saved tabs, got %d", len(saved.Tabs))
+	}
+	if saved.Tabs[0].Kind != state.KindVideo || saved.Tabs[0].ID != "fake_vid_001" {
+		t.Errorf("tab[0] = %+v, want video/fake_vid_001", saved.Tabs[0])
+	}
+	if saved.Tabs[1].Kind != state.KindChannel || saved.Tabs[1].ID != "UCfake123" {
+		t.Errorf("tab[1] = %+v, want channel/UCfake123", saved.Tabs[1])
+	}
+
+	// Session 2: new model should load pending restore from saved state
+	m2 := New(client, cfg, Options{})
+	if len(m2.pendingRestore) != 2 {
+		t.Fatalf("expected 2 pending restore entries, got %d", len(m2.pendingRestore))
+	}
+	if m2.pendingRestore[0].Kind != state.KindVideo || m2.pendingRestore[0].ID != "fake_vid_001" {
+		t.Errorf("pendingRestore[0] = %+v, want video/fake_vid_001", m2.pendingRestore[0])
+	}
+	if m2.pendingRestore[1].Kind != state.KindChannel || m2.pendingRestore[1].ID != "UCfake123" {
+		t.Errorf("pendingRestore[1] = %+v, want channel/UCfake123", m2.pendingRestore[1])
+	}
+}
+
+func TestVideoMode_TabPersistDisabledByDefault(t *testing.T) {
+	cfg := testConfig() // RestoreTabs = false (default)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Video " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "fake_vid_002", Title: "Fake Video 2"}})
+	time.Sleep(200 * time.Millisecond)
+	quitAndGetVideoModel(t, tm)
+
+	// No state file should be written
+	saved, err := state.Load("video")
+	if err != nil {
+		t.Fatalf("state.Load error: %v", err)
+	}
+	if saved != nil {
+		t.Errorf("expected no saved state when restore_tabs is disabled, got %+v", saved)
+	}
+}
+
+func TestVideoMode_TabPersistCloseRemovesFromState(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Video " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "fake_vid_003", Title: "Tab to Close"}})
+	time.Sleep(200 * time.Millisecond)
+	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "fake_vid_004", Title: "Tab to Keep"}})
+	time.Sleep(200 * time.Millisecond)
+
+	// Close the active tab (fake_vid_004)
+	sendSpecialKey(tm, tea.KeyEscape)
+	time.Sleep(200 * time.Millisecond)
+
+	quitAndGetVideoModel(t, tm)
+
+	saved, err := state.Load("video")
+	if err != nil {
+		t.Fatalf("state.Load error: %v", err)
+	}
+	if saved == nil {
+		t.Fatal("expected saved state, got nil")
+	}
+	if len(saved.Tabs) != 1 {
+		t.Fatalf("expected 1 saved tab after close, got %d", len(saved.Tabs))
+	}
+	if saved.Tabs[0].ID != "fake_vid_003" {
+		t.Errorf("remaining tab ID = %q, want %q", saved.Tabs[0].ID, "fake_vid_003")
+	}
+}
+
+func TestVideoMode_PostNotPersisted(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Video " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+		getPostCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+
+	// Open a video tab
+	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "fake_vid_005", Title: "Persistable"}})
+	time.Sleep(200 * time.Millisecond)
+
+	// Open a post tab (posts are not persistable)
+	tm.Send(channel.PostSelectedMsg{Post: youtube.Post{ID: "fake_post_001", Content: "Fake post content"}})
+	time.Sleep(200 * time.Millisecond)
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.tabs.Len() != 2 {
+		t.Fatalf("expected 2 open tabs, got %d", m.tabs.Len())
+	}
+
+	saved, err := state.Load("video")
+	if err != nil {
+		t.Fatalf("state.Load error: %v", err)
+	}
+	if saved == nil {
+		t.Fatal("expected saved state, got nil")
+	}
+	// Only the video tab should be persisted, not the post
+	if len(saved.Tabs) != 1 {
+		t.Fatalf("expected 1 saved tab (post excluded), got %d", len(saved.Tabs))
+	}
+	if saved.Tabs[0].ID != "fake_vid_005" {
+		t.Errorf("saved tab ID = %q, want %q", saved.Tabs[0].ID, "fake_vid_005")
+	}
+}
+
+func TestMusicMode_TabPersistSaveAndRestore(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	mc := &mockMusicClient{
+		authenticated: true,
+		getArtistFn: func(_ context.Context, browseID string) (*youtube.MusicArtistPage, error) {
+			return &youtube.MusicArtistPage{Name: "Fake Artist"}, nil
+		},
+	}
+	ytClient := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Song " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	// Session 1: open a song tab via URL submit
+	tm := newTestMusicProgramFull(t, ytClient, mc, nil, cfg, Options{})
+	tm.Send(urlinput.SubmitMsg{Parsed: youtube.ParsedURL{Kind: youtube.URLVideo, ID: "fake_song_001"}})
+	time.Sleep(200 * time.Millisecond)
+
+	quitAndGetMusicModel(t, tm)
+
+	// Verify state file was written
+	saved, err := state.Load("music")
+	if err != nil {
+		t.Fatalf("state.Load error: %v", err)
+	}
+	if saved == nil {
+		t.Fatal("expected saved state, got nil")
+	}
+	if len(saved.Tabs) != 1 {
+		t.Fatalf("expected 1 saved tab, got %d", len(saved.Tabs))
+	}
+	if saved.Tabs[0].Kind != state.KindSong || saved.Tabs[0].ID != "fake_song_001" {
+		t.Errorf("tab[0] = %+v, want song/fake_song_001", saved.Tabs[0])
+	}
+
+	// Session 2: new model should load pending restore
+	m2 := NewMusic(mc, ytClient, cfg, nil, Options{})
+	if len(m2.pendingRestore) != 1 {
+		t.Fatalf("expected 1 pending restore entry, got %d", len(m2.pendingRestore))
+	}
+	if m2.pendingRestore[0].Kind != state.KindSong || m2.pendingRestore[0].ID != "fake_song_001" {
+		t.Errorf("pendingRestore[0] = %+v, want song/fake_song_001", m2.pendingRestore[0])
+	}
+}
+
+func TestTabPersist_IndependentModes(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	ytClient := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Video " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+	mc := &mockMusicClient{authenticated: true}
+
+	// Open a video tab in video mode
+	vtm := newTestVideoProgramFull(t, ytClient, cfg, Options{})
+	vtm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "fake_vid_010", Title: "Video Tab"}})
+	time.Sleep(200 * time.Millisecond)
+	quitAndGetVideoModel(t, vtm)
+
+	// Open a song tab in music mode via URL submit
+	mtm := newTestMusicProgramFull(t, ytClient, mc, nil, cfg, Options{})
+	mtm.Send(urlinput.SubmitMsg{Parsed: youtube.ParsedURL{Kind: youtube.URLVideo, ID: "fake_song_010"}})
+	time.Sleep(200 * time.Millisecond)
+	quitAndGetMusicModel(t, mtm)
+
+	// Verify independent state files
+	videoState, err := state.Load("video")
+	if err != nil {
+		t.Fatalf("state.Load(video) error: %v", err)
+	}
+	musicState, err := state.Load("music")
+	if err != nil {
+		t.Fatalf("state.Load(music) error: %v", err)
+	}
+	if videoState == nil || len(videoState.Tabs) != 1 {
+		t.Fatalf("video state: expected 1 tab, got %v", videoState)
+	}
+	if musicState == nil || len(musicState.Tabs) != 1 {
+		t.Fatalf("music state: expected 1 tab, got %v", musicState)
+	}
+	if videoState.Tabs[0].Kind != state.KindVideo {
+		t.Errorf("video state tab kind = %q, want %q", videoState.Tabs[0].Kind, "video")
+	}
+	if musicState.Tabs[0].Kind != state.KindSong {
+		t.Errorf("music state tab kind = %q, want %q", musicState.Tabs[0].Kind, "song")
+	}
+
+	// Video mode should not restore music tabs
+	vm := New(ytClient, cfg, Options{})
+	if len(vm.pendingRestore) != 1 || vm.pendingRestore[0].Kind != state.KindVideo {
+		t.Errorf("video pendingRestore = %+v, want 1 video tab", vm.pendingRestore)
+	}
+
+	// Music mode should not restore video tabs
+	mm := NewMusic(mc, ytClient, cfg, nil, Options{})
+	if len(mm.pendingRestore) != 1 || mm.pendingRestore[0].Kind != state.KindSong {
+		t.Errorf("music pendingRestore = %+v, want 1 song tab", mm.pendingRestore)
+	}
+}
+
+// === Deferred Loading for Restored Tabs ===
+
+func TestVideoMode_RestoreTabsCreatesNeedsLoad(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	client := &mockYTClient{authenticated: true}
+
+	// Write state with a video, channel, and playlist tab
+	state.Save("video", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindVideo, ID: "fake_vid_020", Title: "Restored Video"},
+		{Kind: state.KindChannel, ID: "UCfake_ch_020", Title: "Restored Channel"},
+		{Kind: state.KindPlaylist, ID: "PLfake_pl_020", Title: "Restored Playlist"},
+	}})
+
+	m := New(client, cfg, Options{})
+	// Call Init to trigger restoreTabs via initCmds
+	m.Init()
+
+	if m.tabs.Len() != 3 {
+		t.Fatalf("expected 3 restored tabs, got %d", m.tabs.Len())
+	}
+	for i, tab := range m.tabs.All() {
+		if !tab.needsLoad {
+			t.Errorf("tab[%d] needsLoad = false, want true", i)
+		}
+	}
+	// Active view should be search, not dynamic tab
+	if m.activeView != ViewSearch {
+		t.Errorf("activeView = %d, want ViewSearch (%d)", m.activeView, ViewSearch)
+	}
+}
+
+func TestVideoMode_LoadRestoredTabTriggersLoad(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	state.Save("video", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindVideo, ID: "fake_vid_021", Title: "Pending Video"},
+	}})
+
+	m := New(client, cfg, Options{})
+	m.Init()
+	// Simulate receiving a window size so content height is non-zero
+	m.width = 80
+	m.height = 24
+
+	// Switch to the restored tab
+	m.activeView = ViewDynamicTab
+	m.tabs.SetActive(0)
+	cmd := m.loadRestoredTab()
+
+	tab := m.tabs.Active()
+	if tab.needsLoad {
+		t.Error("needsLoad should be false after loadRestoredTab")
+	}
+	if cmd == nil {
+		t.Fatal("loadRestoredTab should return a non-nil command")
+	}
+}
+
+func TestVideoMode_LoadRestoredTabNoopForNormalTab(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{ID: id, Title: "Video " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+	cfg := testConfig()
+
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+	// Open a normal tab (not restored)
+	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "fake_vid_022", Title: "Normal Tab"}})
+	time.Sleep(200 * time.Millisecond)
+
+	m := quitAndGetVideoModel(t, tm)
+	tab := m.tabs.Active()
+	if tab == nil {
+		t.Fatal("expected active tab")
+	}
+	if tab.needsLoad {
+		t.Error("normal tab should have needsLoad = false")
+	}
+	cmd := m.loadRestoredTab()
+	if cmd != nil {
+		t.Error("loadRestoredTab should return nil for normal tab")
+	}
+}
+
+func TestVideoMode_SwitchToRestoredTabLoadsContent(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var getVideoCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			getVideoCalls.Add(1)
+			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	// Save a video tab
+	state.Save("video", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindVideo, ID: "fake_vid_023", Title: "Saved Tab"},
+	}})
+
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+
+	// No video should have been loaded yet (deferred)
+	if c := getVideoCalls.Load(); c > 0 {
+		t.Errorf("expected 0 GetVideo calls before switch, got %d", c)
+	}
+
+	// Switch to the restored tab (tab key "4")
+	sendKey(tm, "4")
+	waitForContent(t, tm, "Loaded fake_vid_023")
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.activeView != ViewDynamicTab {
+		t.Errorf("expected ViewDynamicTab after switch, got %d", m.activeView)
+	}
+	if c := getVideoCalls.Load(); c == 0 {
+		t.Error("expected GetVideo to be called after switching to restored tab")
+	}
+}
+
+func TestVideoMode_RestoredChannelTabLoadsOnSwitch(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var channelCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getChannelVideosFn: func(_ context.Context, chID, _ string) (*youtube.Page[youtube.Video], error) {
+			channelCalls.Add(1)
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "ch_vid_1", Title: "Channel Video 1"}},
+			}, nil
+		},
+	}
+
+	state.Save("video", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindChannel, ID: "UCfake_ch_030", Title: "Saved Channel"},
+	}})
+
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+
+	if c := channelCalls.Load(); c > 0 {
+		t.Errorf("expected 0 channel calls before switch, got %d", c)
+	}
+
+	sendKey(tm, "4")
+	waitForContent(t, tm, "Channel Video 1")
+
+	quitAndGetVideoModel(t, tm)
+	if c := channelCalls.Load(); c == 0 {
+		t.Error("expected channel load after switching to restored tab")
+	}
+}
+
+func TestVideoMode_RestoredPlaylistTabLoadsOnSwitch(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var playlistCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getPlaylistVideosFn: func(_ context.Context, plID, _ string) (*youtube.Page[youtube.Video], error) {
+			playlistCalls.Add(1)
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "pl_vid_1", Title: "Playlist Video 1"}},
+			}, nil
+		},
+	}
+
+	state.Save("video", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindPlaylist, ID: "PLfake_pl_030", Title: "Saved Playlist"},
+	}})
+
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+
+	if c := playlistCalls.Load(); c > 0 {
+		t.Errorf("expected 0 playlist calls before switch, got %d", c)
+	}
+
+	sendKey(tm, "4")
+	waitForContent(t, tm, "Playlist Video 1")
+
+	quitAndGetVideoModel(t, tm)
+	if c := playlistCalls.Load(); c == 0 {
+		t.Error("expected playlist load after switching to restored tab")
+	}
+}
+
+func TestMusicMode_RestoreTabsCreatesNeedsLoad(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	mc := &mockMusicClient{authenticated: true}
+	ytClient := &mockYTClient{authenticated: true}
+
+	state.Save("music", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindSong, ID: "fake_song_020", Title: "Restored Song"},
+		{Kind: state.KindArtist, ID: "UCfake_artist_020", Title: "Restored Artist"},
+	}})
+
+	m := NewMusic(mc, ytClient, cfg, nil, Options{})
+	m.Init()
+
+	if m.tabs.Len() != 2 {
+		t.Fatalf("expected 2 restored tabs, got %d", m.tabs.Len())
+	}
+	for i, tab := range m.tabs.All() {
+		if !tab.needsLoad {
+			t.Errorf("tab[%d] needsLoad = false, want true", i)
+		}
+	}
+	if !m.onFixedView {
+		t.Error("expected onFixedView = true after restore")
+	}
+}
+
+func TestMusicMode_SwitchToRestoredSongTabLoadsContent(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var getVideoCalls atomic.Int32
+	mc := &mockMusicClient{authenticated: true}
+	ytClient := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			getVideoCalls.Add(1)
+			return &youtube.Video{ID: id, Title: "Loaded Song " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	state.Save("music", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindSong, ID: "fake_song_030", Title: "Saved Song"},
+	}})
+
+	tm := newTestMusicProgramFull(t, ytClient, mc, nil, cfg, Options{})
+
+	if c := getVideoCalls.Load(); c > 0 {
+		t.Errorf("expected 0 GetVideo calls before switch, got %d", c)
+	}
+
+	sendKey(tm, "4")
+	waitForContent(t, tm, "Loaded Song fake_song_030")
+
+	quitAndGetMusicModel(t, tm)
+	if c := getVideoCalls.Load(); c == 0 {
+		t.Error("expected GetVideo to be called after switching to restored song tab")
+	}
+}
+
+func TestMusicMode_SwitchToRestoredArtistTabLoadsContent(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var artistCalls atomic.Int32
+	mc := &mockMusicClient{
+		authenticated: true,
+		getArtistFn: func(_ context.Context, browseID string) (*youtube.MusicArtistPage, error) {
+			artistCalls.Add(1)
+			return &youtube.MusicArtistPage{
+				Name: "Loaded Artist",
+				Shelves: []youtube.MusicShelf{
+					{Title: "Songs", Items: []youtube.MusicItem{
+						{Title: "Artist Song 1", Type: youtube.MusicSong},
+					}},
+				},
+			}, nil
+		},
+	}
+	ytClient := &mockYTClient{authenticated: true}
+
+	state.Save("music", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindArtist, ID: "UCfake_artist_030", Title: "Saved Artist"},
+	}})
+
+	tm := newTestMusicProgramFull(t, ytClient, mc, nil, cfg, Options{})
+
+	if c := artistCalls.Load(); c > 0 {
+		t.Errorf("expected 0 artist calls before switch, got %d", c)
+	}
+
+	sendKey(tm, "4")
+	waitForContent(t, tm, "Loaded Artist")
+
+	quitAndGetMusicModel(t, tm)
+	if c := artistCalls.Load(); c == 0 {
+		t.Error("expected GetArtist to be called after switching to restored tab")
+	}
+}
+
+func TestVideoMode_CloseRestoredTabLoadsNextRestored(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var getVideoCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			getVideoCalls.Add(1)
+			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	// Save two video tabs
+	state.Save("video", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindVideo, ID: "fake_vid_040", Title: "First"},
+		{Kind: state.KindVideo, ID: "fake_vid_041", Title: "Second"},
+	}})
+
+	tm := newTestVideoProgramFull(t, client, cfg, Options{})
+
+	// Switch to the second restored tab (tab key "5")
+	sendKey(tm, "5")
+	waitForContent(t, tm, "Loaded fake_vid_041")
+
+	// Close it with Esc — should fall back to first tab and load it
+	getVideoCalls.Store(0)
+	sendSpecialKey(tm, tea.KeyEscape)
+	waitForContent(t, tm, "Loaded fake_vid_040")
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.tabs.Len() != 1 {
+		t.Errorf("expected 1 tab remaining, got %d", m.tabs.Len())
+	}
+	if c := getVideoCalls.Load(); c == 0 {
+		t.Error("expected GetVideo to be called for the next restored tab after close")
+	}
+}
+
+func TestMusicMode_CloseRestoredTabLoadsNextRestored(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var getVideoCalls atomic.Int32
+	mc := &mockMusicClient{authenticated: true}
+	ytClient := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			getVideoCalls.Add(1)
+			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	state.Save("music", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindSong, ID: "fake_song_040", Title: "First Song"},
+		{Kind: state.KindSong, ID: "fake_song_041", Title: "Second Song"},
+	}})
+
+	tm := newTestMusicProgramFull(t, ytClient, mc, nil, cfg, Options{})
+
+	// Switch to second tab
+	sendKey(tm, "5")
+	waitForContent(t, tm, "Loaded fake_song_041")
+
+	// Close it — should load the first tab
+	getVideoCalls.Store(0)
+	sendSpecialKey(tm, tea.KeyEscape)
+	waitForContent(t, tm, "Loaded fake_song_040")
+
+	m := quitAndGetMusicModel(t, tm)
+	if m.tabs.Len() != 1 {
+		t.Errorf("expected 1 tab remaining, got %d", m.tabs.Len())
+	}
+	if c := getVideoCalls.Load(); c == 0 {
+		t.Error("expected GetVideo to be called for the next restored tab after close")
 	}
 }

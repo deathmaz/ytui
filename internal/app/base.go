@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/auth"
+	"github.com/deathmaz/ytui/internal/config"
+	"github.com/deathmaz/ytui/internal/state"
 	"github.com/deathmaz/ytui/internal/ui/search"
 	"github.com/deathmaz/ytui/internal/ui/urlinput"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -101,6 +103,8 @@ func HandleAuthResult(
 	browser string,
 	pendingOpen **youtube.ParsedURL,
 	openFn func(*youtube.ParsedURL) tea.Cmd,
+	pendingRestore *[]state.TabEntry,
+	restoreFn func([]state.TabEntry) tea.Cmd,
 	setupFn func(*http.Client) error,
 	reloadActiveView func() tea.Cmd,
 	resizeViews func(),
@@ -124,6 +128,10 @@ func HandleAuthResult(
 	if *pendingOpen != nil {
 		cmds = append(cmds, openFn(*pendingOpen))
 		*pendingOpen = nil
+	}
+	if len(*pendingRestore) > 0 {
+		cmds = append(cmds, restoreFn(*pendingRestore))
+		*pendingRestore = nil
 	}
 	resizeViews()
 	return tea.Batch(cmds...)
@@ -245,9 +253,11 @@ func handleURLInput(msg tea.Msg, u *urlinput.Model) (tea.Cmd, bool) {
 func initCmds(
 	authOnStartup bool,
 	pendingOpen **youtube.ParsedURL,
+	pendingRestore *[]state.TabEntry,
 	searchInit tea.Cmd,
 	authCmd func() tea.Cmd,
 	openFn func(*youtube.ParsedURL) tea.Cmd,
+	restoreFn func([]state.TabEntry) tea.Cmd,
 	searchQuery string,
 	refreshCmd func() tea.Cmd,
 ) tea.Cmd {
@@ -255,7 +265,7 @@ func initCmds(
 	cmds = append(cmds, searchInit)
 	if authOnStartup {
 		cmds = append(cmds, authCmd())
-		if *pendingOpen != nil {
+		if *pendingOpen != nil || len(*pendingRestore) > 0 {
 			return tea.Batch(cmds...)
 		}
 	}
@@ -263,8 +273,32 @@ func initCmds(
 		cmds = append(cmds, openFn(*pendingOpen))
 		*pendingOpen = nil
 	}
+	if len(*pendingRestore) > 0 {
+		cmds = append(cmds, restoreFn(*pendingRestore))
+		*pendingRestore = nil
+	}
 	if searchQuery != "" {
 		cmds = append(cmds, refreshCmd())
 	}
 	return tea.Batch(cmds...)
+}
+
+// saveTabState persists the current tab state if restore_tabs is enabled.
+func saveTabState(cfg *config.Config, mode string, entries []state.TabEntry) {
+	if !cfg.General.RestoreTabs {
+		return
+	}
+	_ = state.Save(mode, &state.TabState{Tabs: entries})
+}
+
+// loadSavedTabs reads the persisted tab state for the given mode.
+func loadSavedTabs(cfg *config.Config, mode string) []state.TabEntry {
+	if !cfg.General.RestoreTabs {
+		return nil
+	}
+	s, err := state.Load(mode)
+	if err != nil || s == nil {
+		return nil
+	}
+	return s.Tabs
 }

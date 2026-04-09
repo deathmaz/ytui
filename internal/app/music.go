@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deathmaz/ytui/internal/config"
 	ytimage "github.com/deathmaz/ytui/internal/image"
+	"github.com/deathmaz/ytui/internal/state"
 	"github.com/deathmaz/ytui/internal/ui/detail"
 	"github.com/deathmaz/ytui/internal/ui/search"
 	"github.com/deathmaz/ytui/internal/ui/urlinput"
@@ -52,6 +53,7 @@ type musicTab struct {
 	kind         musicTabKind
 	title        string
 	browseID     string
+	needsLoad    bool // true for restored tabs that haven't loaded yet
 	// Artist page
 	artistPage   *youtube.MusicArtistPage
 	artistSubs   []subTab
@@ -160,6 +162,7 @@ type MusicModel struct {
 
 	authenticating  bool
 	pendingOpen     *youtube.ParsedURL
+	pendingRestore  []state.TabEntry
 	startupWarning  string
 	status          StatusManager
 }
@@ -198,6 +201,7 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 		spinner:     styles.NewSpinner(),
 		tabs:           NewTabSet[musicTab](maxMusicTabs, func(t *musicTab) string { return t.browseID }),
 		pendingOpen:    opts.OpenURL,
+		pendingRestore: loadSavedTabs(cfg, "music"),
 		startupWarning: opts.Warning,
 	}
 
@@ -208,9 +212,11 @@ func (m *MusicModel) Init() tea.Cmd {
 	cmd := initCmds(
 		m.cfg.Auth.AuthOnStartup,
 		&m.pendingOpen,
+		&m.pendingRestore,
 		m.search.Init(),
 		m.authenticate,
 		m.openParsedURL,
+		m.restoreTabs,
 		m.search.Query(),
 		m.search.Refresh,
 	)
@@ -259,7 +265,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch {
 				case key.Matches(keyMsg, m.keys.Back):
 					m.closeActiveTab()
-					return m, nil
+					return m, m.loadRestoredTab()
 				case key.Matches(keyMsg, m.keys.Play):
 					return m, playVideoCmd(youtube.VideoURL(tab.browseID), "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
 				default:
@@ -308,7 +314,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Back):
 			if !m.onFixedView {
 				m.closeActiveTab()
-				return m, m.refetchVisibleThumbs()
+				return m, tea.Batch(m.loadRestoredTab(), m.refetchVisibleThumbs())
 			}
 		case key.Matches(msg, m.keys.Play):
 			return m, m.playSelected()
@@ -336,7 +342,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if tabIdx < m.tabs.Len() {
 				m.onFixedView = false
 				m.tabs.SetActive(tabIdx)
-				return m, m.refetchVisibleThumbs()
+				return m, tea.Batch(m.loadRestoredTab(), m.refetchVisibleThumbs())
 			}
 		}
 
@@ -578,6 +584,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AuthResult:
 		return m, HandleAuthResult(msg, &m.authenticating, &m.status, m.cfg.Auth.Browser,
 			&m.pendingOpen, m.openParsedURL,
+			&m.pendingRestore, m.restoreTabs,
 			func(httpClient *http.Client) error {
 				newClient, err := youtube.NewMusicClient(httpClient)
 				if err != nil {
@@ -831,6 +838,94 @@ func (m *MusicModel) closeActiveTab() {
 	if empty {
 		m.onFixedView = true
 	}
+	saveTabState(m.cfg, "music", m.tabEntries())
+}
+
+// tabEntries returns the current dynamic tabs as persistable entries.
+func (m *MusicModel) tabEntries() []state.TabEntry {
+	var entries []state.TabEntry
+	for _, tab := range m.tabs.All() {
+		var kind string
+		switch tab.kind {
+		case musicTabArtist:
+			kind = state.KindArtist
+		case musicTabAlbum:
+			kind = state.KindAlbum
+		case musicTabSong:
+			kind = state.KindSong
+		default:
+			continue
+		}
+		entries = append(entries, state.TabEntry{Kind: kind, ID: tab.browseID, Title: tab.title})
+	}
+	return entries
+}
+
+// restoreTabs creates tab entries from a previous session without loading
+// their content. Loading is deferred until the user switches to the tab
+// (via loadRestoredTab), because messages from background loads would be
+// dropped while the user is on a different view.
+func (m *MusicModel) restoreTabs(entries []state.TabEntry) tea.Cmd {
+	for _, e := range entries {
+		var kind musicTabKind
+		switch e.Kind {
+		case state.KindArtist:
+			kind = musicTabArtist
+		case state.KindAlbum:
+			kind = musicTabAlbum
+		case state.KindSong:
+			kind = musicTabSong
+		default:
+			continue
+		}
+		tab := musicTab{
+			kind:      kind,
+			title:     e.Title,
+			browseID:  e.ID,
+			needsLoad: true,
+		}
+		if kind == musicTabSong {
+			tab.songDetail = detail.New(m.ytClient, m.imgR)
+		}
+		if _, err := m.tabs.Open(tab); err != nil {
+			break
+		}
+	}
+	m.onFixedView = true
+	return nil
+}
+
+// loadRestoredTab triggers the initial load for the active tab if it was
+// restored from a previous session and hasn't loaded yet.
+func (m *MusicModel) loadRestoredTab() tea.Cmd {
+	tab := m.tabs.Active()
+	if tab == nil || !tab.needsLoad {
+		return nil
+	}
+	tab.needsLoad = false
+	switch tab.kind {
+	case musicTabSong:
+		tab.songDetail.SetSize(m.width, m.contentHeight())
+		tab.loaded = true
+		return tab.songDetail.LoadVideo(tab.browseID)
+	case musicTabArtist:
+		m.pageLoading = true
+		m.thumbList.Invalidate()
+		client := m.client
+		return tea.Batch(m.spinner.Tick, func() tea.Msg {
+			artist, err := client.GetArtist(context.Background(), tab.browseID)
+			return musicArtistLoadedMsg{BrowseID: tab.browseID, Artist: artist, Err: err}
+		})
+	case musicTabAlbum:
+		m.pageLoading = true
+		m.thumbList.Invalidate()
+		client := m.client
+		return tea.Batch(m.spinner.Tick, func() tea.Msg {
+			album, err := client.GetAlbum(context.Background(), tab.browseID)
+			return musicAlbumLoadedMsg{BrowseID: tab.browseID, Album: album, Err: err}
+		})
+	}
+	return nil
 }
 
 func (m *MusicModel) openSelected() tea.Cmd {
@@ -912,6 +1007,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 		m.tabs.SetActive(idx)
 		m.onFixedView = false
 		m.thumbList.Invalidate()
+		saveTabState(m.cfg, "music", m.tabEntries())
 		return m.tabs.Active().songDetail.LoadVideo(browseID)
 	}
 
@@ -923,6 +1019,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 	m.onFixedView = false
 	m.pageLoading = true
 	m.thumbList.Invalidate()
+	saveTabState(m.cfg, "music", m.tabEntries())
 
 	client := m.client
 	switch kind {

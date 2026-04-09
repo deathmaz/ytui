@@ -78,6 +78,9 @@ func TestDefault(t *testing.T) {
 	if cfg.Thumbnails.Height != 5 {
 		t.Errorf("Thumbnails.Height = %d, want 5", cfg.Thumbnails.Height)
 	}
+	if cfg.General.RestoreTabs {
+		t.Error("General.RestoreTabs should default to false")
+	}
 }
 
 func TestLoad_NoFile(t *testing.T) {
@@ -227,6 +230,32 @@ height = 7
 	}
 	if cfg.Thumbnails.Height != 7 {
 		t.Errorf("Thumbnails.Height = %d, want 7", cfg.Thumbnails.Height)
+	}
+	if cfg.Player.Video.Command != "mpv" {
+		t.Errorf("Player.Video.Command = %q, want default %q", cfg.Player.Video.Command, "mpv")
+	}
+}
+
+func TestLoad_RestoreTabs(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfgDir := filepath.Join(dir, "ytui")
+	os.MkdirAll(cfgDir, 0755)
+
+	content := `
+[general]
+restore_tabs = true
+`
+	os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0644)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !cfg.General.RestoreTabs {
+		t.Error("General.RestoreTabs should be true")
 	}
 	if cfg.Player.Video.Command != "mpv" {
 		t.Errorf("Player.Video.Command = %q, want default %q", cfg.Player.Video.Command, "mpv")
