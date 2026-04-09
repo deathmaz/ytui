@@ -91,7 +91,7 @@ func TestWrapView_RetransmitsWhenNewImageLoads(t *testing.T) {
 	// Stabilize with A cached, B not.
 	stabilize(tl, items, "V")
 
-	// B loads.
+	// B loads — full retransmit with DeleteAll + all cached.
 	imgR.Store("http://thumb/b", "TX_B", "PL_B")
 
 	out := tl.WrapView(items, "V")
@@ -236,6 +236,43 @@ func TestWrapView_DeleteStaleSentOnlyOnce(t *testing.T) {
 		if out != "V" {
 			t.Errorf("call %d: should return plain view, got length %d", i+2, len(out))
 		}
+	}
+}
+
+// TestWrapView_PageScrollToUncachedSendsDeleteAll verifies that scrolling
+// to a page where no images are cached yet sends a bare DeleteAll to purge
+// stale virtual placements from the previous page.
+func TestWrapView_PageScrollToUncachedSendsDeleteAll(t *testing.T) {
+	imgR := ytimage.NewRenderer()
+	tl := NewThumbList(imgR, VideoThumbURL, 5)
+
+	imgR.Store("http://thumb/a", "TX_A", "PL_A")
+	imgR.Store("http://thumb/b", "TX_B", "PL_B")
+	page1 := testItems("http://thumb/a", "http://thumb/b")
+
+	// Show page 1, let it stabilize.
+	stabilize(tl, page1, "V")
+
+	// Scroll to page 2 — items with no cached images.
+	page2 := testItems("http://thumb/c", "http://thumb/d")
+	deleteAll := ytimage.DeleteAll()
+
+	out := tl.WrapView(page2, "V")
+	if !strings.Contains(out, deleteAll) {
+		t.Error("scrolling to uncached page should send DeleteAll to clear old placements")
+	}
+
+	// Next frame: still no cached, should not send DeleteAll again.
+	out2 := tl.WrapView(page2, "V")
+	if out2 != "V" {
+		t.Errorf("second call with same uncached page should skip, got length %d", len(out2))
+	}
+
+	// When first image loads, retransmit as usual.
+	imgR.Store("http://thumb/c", "TX_C", "PL_C")
+	out3 := tl.WrapView(page2, "V")
+	if !strings.Contains(out3, "TX_C") {
+		t.Error("should retransmit when first page 2 image loads")
 	}
 }
 

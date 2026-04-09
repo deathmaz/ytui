@@ -2,11 +2,12 @@ package channel
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
-	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/config"
+	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -139,6 +140,127 @@ func TestRefetchThumbs_PlaylistsTab(t *testing.T) {
 
 	if cmd := m.RefetchThumbs(); cmd == nil {
 		t.Error("should return non-nil for evicted playlist thumbnail")
+	}
+}
+
+// TestRenderSpinner_IncludesDeleteAll verifies that loading spinners route
+// through WrapView so that DELETE_STALE fires and clears stale images.
+func TestRenderSpinner_IncludesDeleteAll(t *testing.T) {
+	imgR := ytimage.NewRendererWithMax(200)
+	m := newTestChannel(imgR, 5)
+	m.channel = youtube.Channel{ID: "ch1", Name: "TestChan"}
+	deleteAll := ytimage.DeleteAll()
+
+	tests := []struct {
+		name  string
+		setup func()
+		render func() string
+	}{
+		{
+			name: "videos_loading",
+			setup: func() {
+				m.videoLoading = true
+				m.videoLoaded = false
+				m.thumbList.Invalidate()
+			},
+			render: m.renderVideos,
+		},
+		{
+			name: "playlists_loading",
+			setup: func() {
+				m.playlistLoading = true
+				m.playlistLoaded = false
+				m.plThumbList.Invalidate()
+			},
+			render: m.renderPlaylists,
+		},
+		{
+			name: "streams_loading",
+			setup: func() {
+				m.streamLoading = true
+				m.streamLoaded = false
+				m.thumbList.Invalidate()
+			},
+			render: m.renderStreams,
+		},
+		{
+			name: "posts_loading",
+			setup: func() {
+				m.postLoading = true
+				m.postLoaded = false
+				m.thumbList.Invalidate()
+			},
+			render: m.renderPosts,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.setup()
+			out := tt.render()
+			if !strings.Contains(out, deleteAll) {
+				t.Errorf("loading spinner should include DeleteAll to clear stale images")
+			}
+		})
+	}
+}
+
+// TestRenderPosts_RoutedThroughWrapView verifies that even loaded posts
+// (which have no thumbnails) route through WrapView to clear stale images.
+func TestRenderPosts_RoutedThroughWrapView(t *testing.T) {
+	imgR := ytimage.NewRendererWithMax(200)
+	m := newTestChannel(imgR, 5)
+
+	// Simulate: videos were showing, then user switches to posts.
+	imgR.Store("https://fake/v1.jpg", "TX_V1", "PL_V1")
+	m.postLoaded = true
+	m.postLoading = false
+
+	// Invalidate (as onTabSwitch does for posts).
+	m.thumbList.Invalidate()
+	out := m.renderPosts()
+	deleteAll := ytimage.DeleteAll()
+	if !strings.Contains(out, deleteAll) {
+		t.Error("posts view should include DeleteAll after invalidation to clear stale video images")
+	}
+
+	// Subsequent render should skip (no more DeleteAll).
+	out2 := m.renderPosts()
+	if strings.Contains(out2, deleteAll) {
+		t.Error("posts view should not include DeleteAll on subsequent stable frames")
+	}
+}
+
+// TestOnTabSwitch_PostsInvalidates verifies that switching to the posts
+// sub-tab invalidates the video ThumbList so stale images are cleared.
+func TestOnTabSwitch_PostsInvalidates(t *testing.T) {
+	imgR := ytimage.NewRendererWithMax(200)
+	m := newTestChannel(imgR, 5)
+
+	// Simulate stable video images.
+	imgR.Store("https://fake/v1.jpg", "TX_V1", "PL_V1")
+	items := []list.Item{shared.VideoItem{Video: youtube.Video{
+		ID: "v1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake/v1.jpg", Width: 320}},
+	}}}
+	m.videoList.SetItems(items)
+	m.videoLoaded = true
+
+	// Stabilize the video ThumbList.
+	for i := 0; i < 5; i++ {
+		m.thumbList.WrapView(shared.VisibleItems(m.videoList), "V")
+	}
+
+	// Posts already loaded (so loadPosts returns nil early).
+	m.postLoaded = true
+
+	// Switch to posts.
+	m.activeTab = tabPosts
+	m.onTabSwitch()
+
+	// renderPosts should now include DeleteAll.
+	out := m.renderPosts()
+	if !strings.Contains(out, ytimage.DeleteAll()) {
+		t.Error("after switching to posts, renderPosts should clear stale video images")
 	}
 }
 

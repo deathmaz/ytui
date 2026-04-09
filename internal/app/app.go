@@ -237,6 +237,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(m.feed.Load(false), m.refetchVisibleThumbs())
 			case key.Matches(msg, m.keys.Subs):
 				m.switchTo(ViewSubs)
+				m.listThumbList.Invalidate()
 				return m, m.subs.Load(false)
 			case key.Matches(msg, m.keys.Detail):
 				return m, m.openDetail()
@@ -448,6 +449,7 @@ func (m *Model) openVideoTab(v *youtube.Video) tea.Cmd {
 	if idx, found := m.tabs.Find(v.ID); found {
 		m.activeView = ViewDynamicTab
 		m.tabs.SetActive(idx)
+		m.listThumbList.Invalidate()
 		return nil
 	}
 
@@ -465,6 +467,7 @@ func (m *Model) openVideoTab(v *youtube.Video) tea.Cmd {
 	}
 	m.tabs.SetActive(idx)
 	m.activeView = ViewDynamicTab
+	m.listThumbList.Invalidate()
 	return m.tabs.Active().detail.LoadVideo(v.ID)
 }
 
@@ -528,6 +531,7 @@ func (m *Model) openPostTab(p youtube.Post) tea.Cmd {
 	if idx, found := m.tabs.Find(p.ID); found {
 		m.activeView = ViewDynamicTab
 		m.tabs.SetActive(idx)
+		m.listThumbList.Invalidate()
 		return nil
 	}
 
@@ -549,6 +553,7 @@ func (m *Model) openPostTab(p youtube.Post) tea.Cmd {
 	}
 	m.tabs.SetActive(idx)
 	m.activeView = ViewDynamicTab
+	m.listThumbList.Invalidate()
 	return m.tabs.Active().post.Load(p)
 }
 
@@ -860,18 +865,18 @@ func (m *Model) renderContent() string {
 	case ViewFeed:
 		return m.feed.View()
 	case ViewSubs:
-		return m.subs.View()
+		return m.listThumbList.WrapView(nil, m.subs.View())
 	case ViewDynamicTab:
 		if tab := m.tabs.Active(); tab != nil {
 			switch tab.kind {
 			case tabVideo:
-				return tab.detail.View()
+				return m.listThumbList.WrapView(nil, tab.detail.View())
 			case tabChannel:
 				return tab.channel.View()
 			case tabPlaylist:
 				return tab.playlist.View()
 			case tabPost:
-				return tab.post.View()
+				return m.listThumbList.WrapView(nil, tab.post.View())
 			}
 		}
 	}

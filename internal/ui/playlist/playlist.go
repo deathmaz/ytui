@@ -181,7 +181,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) View() string {
 	if m.loading && !m.loaded {
-		return m.spinner.View() + fmt.Sprintf(" Loading playlist %s...", m.playlist.Title)
+		return m.thumbList.WrapView(nil, m.spinner.View()+fmt.Sprintf(" Loading playlist %s...", m.playlist.Title))
 	}
 	return m.thumbList.WrapView(shared.VisibleItems(m.list), m.list.View())
 }

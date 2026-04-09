@@ -889,6 +889,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 	if idx, found := m.tabs.Find(browseID); found {
 		m.onFixedView = false
 		m.tabs.SetActive(idx)
+		m.thumbList.Invalidate()
 		return nil
 	}
 
@@ -910,6 +911,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 		}
 		m.tabs.SetActive(idx)
 		m.onFixedView = false
+		m.thumbList.Invalidate()
 		return m.tabs.Active().songDetail.LoadVideo(browseID)
 	}
 
@@ -1000,7 +1002,7 @@ func (m *MusicModel) renderTabs() string {
 
 func (m *MusicModel) renderContent() string {
 	if m.pageLoading {
-		return m.spinner.View() + " Loading..."
+		return m.thumbList.WrapView(nil, m.spinner.View()+" Loading...")
 	}
 
 	if m.onFixedView {
@@ -1017,15 +1019,15 @@ func (m *MusicModel) renderContent() string {
 
 	if tab := m.activeTab(); tab != nil {
 		if !tab.loaded {
-			return m.spinner.View() + " Loading..."
+			return m.thumbList.WrapView(nil, m.spinner.View()+" Loading...")
 		}
 		switch tab.kind {
 		case musicTabArtist:
 			return m.renderArtistPage(tab)
 		case musicTabAlbum:
-			return m.renderAlbumPage(tab)
+			return m.thumbList.WrapView(nil, m.renderAlbumPage(tab))
 		case musicTabSong:
-			return tab.songDetail.View()
+			return m.thumbList.WrapView(nil, tab.songDetail.View())
 		}
 	}
 	return ""
@@ -1033,7 +1035,7 @@ func (m *MusicModel) renderContent() string {
 
 func (m *MusicModel) renderHome() string {
 	if m.homeLoading {
-		return m.spinner.View() + " Loading home..."
+		return m.thumbList.WrapView(nil, m.spinner.View()+" Loading home...")
 	}
 	if !m.homeLoaded || len(m.homeSubs) == 0 {
 		return styles.Dim.Render("Home feed not loaded")
@@ -1059,7 +1061,7 @@ func (m *MusicModel) renderHome() string {
 
 func (m *MusicModel) renderLibrary() string {
 	if m.libraryLoading {
-		return m.spinner.View() + " Loading library..."
+		return m.thumbList.WrapView(nil, m.spinner.View()+" Loading library...")
 	}
 	if !m.libraryLoaded || len(m.librarySubs) == 0 {
 		return styles.Dim.Render("Press 'a' to authenticate to view library")

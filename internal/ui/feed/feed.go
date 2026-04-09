@@ -184,7 +184,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) View() string {
 	if m.loading {
-		return m.spinner.View() + " Loading subscription feed..."
+		return m.thumbList.WrapView(nil, m.spinner.View()+" Loading subscription feed...")
 	}
 	if !m.loaded {
 		return styles.Dim.Render("Press 'a' to authenticate to view feed")

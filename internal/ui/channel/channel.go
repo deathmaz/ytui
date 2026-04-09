@@ -321,6 +321,7 @@ func (m *Model) loadPosts() tea.Cmd {
 		return nil
 	}
 	m.postLoading = true
+	m.thumbList.Invalidate()
 	client := m.client
 	channelID := m.channel.ID
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
@@ -593,6 +594,9 @@ func (m *Model) onTabSwitch() tea.Cmd {
 	case tabPlaylists:
 		return tea.Batch(m.loadPlaylists(), refetch)
 	case tabPosts:
+		// Invalidate here for the already-loaded case: loadPosts() returns
+		// nil early when postLoaded is true, skipping its own Invalidate.
+		m.thumbList.Invalidate()
 		return m.loadPosts()
 	case tabStreams:
 		return tea.Batch(m.loadStreams(), refetch)
@@ -624,28 +628,28 @@ func (m Model) renderActiveTab() string {
 
 func (m Model) renderVideos() string {
 	if m.videoLoading && !m.videoLoaded {
-		return m.spinner.View() + fmt.Sprintf(" Loading videos for %s...", m.channel.Name)
+		return m.thumbList.WrapView(nil, m.spinner.View()+fmt.Sprintf(" Loading videos for %s...", m.channel.Name))
 	}
 	return m.thumbList.WrapView(shared.VisibleItems(m.videoList), m.videoList.View())
 }
 
 func (m Model) renderPosts() string {
 	if m.postLoading && !m.postLoaded {
-		return m.spinner.View() + " Loading posts..."
+		return m.thumbList.WrapView(nil, m.spinner.View()+" Loading posts...")
 	}
-	return m.postList.View()
+	return m.thumbList.WrapView(nil, m.postList.View())
 }
 
 func (m Model) renderPlaylists() string {
 	if m.playlistLoading && !m.playlistLoaded {
-		return m.spinner.View() + " Loading playlists..."
+		return m.plThumbList.WrapView(nil, m.spinner.View()+" Loading playlists...")
 	}
 	return m.plThumbList.WrapView(shared.VisibleItems(m.playlistList), m.playlistList.View())
 }
 
 func (m Model) renderStreams() string {
 	if m.streamLoading && !m.streamLoaded {
-		return m.spinner.View() + " Loading livestreams..."
+		return m.thumbList.WrapView(nil, m.spinner.View()+" Loading livestreams...")
 	}
 	return m.thumbList.WrapView(shared.VisibleItems(m.streamList), m.streamList.View())
 }

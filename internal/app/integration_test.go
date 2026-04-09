@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1675,5 +1676,130 @@ func TestMusicMode_RefetchOnArtistSubTabSwitch(t *testing.T) {
 
 	if cmd := m.refetchVisibleThumbs(); cmd == nil {
 		t.Error("should return non-nil for uncached artist sub-tab thumbnail")
+	}
+}
+
+// TestVideoMode_SpinnerRoutedThroughWrapView verifies that loading spinners
+// in feed, search, and playlist views route through WrapView so that
+// DELETE_STALE fires immediately after Invalidate().
+func TestVideoMode_SpinnerRoutedThroughWrapView(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+	deleteAll := ytimage.DeleteAll()
+
+	t.Run("feed_spinner", func(t *testing.T) {
+		m := New(&mockYTClient{authenticated: true}, cfg, Options{})
+		tl := m.listThumbList
+		imgR := tl.Renderer()
+
+		// Simulate stable thumbnails on search view.
+		imgR.Store("https://fake.test/s1.jpg", "TX_S1", "PL_S1")
+		items := []list.Item{shared.VideoItem{Video: youtube.Video{
+			ID: "s1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/s1.jpg", Width: 320}},
+		}}}
+		wrapViewStabilize(tl, items, "V")
+
+		// Switch to feed → Load triggers Invalidate + spinner.
+		m.feed.Load(true)
+		out := m.feed.View()
+		if !strings.Contains(out, deleteAll) {
+			t.Error("feed spinner should include DeleteAll via WrapView")
+		}
+	})
+
+	t.Run("search_spinner", func(t *testing.T) {
+		m := New(&mockYTClient{
+			authenticated: true,
+			searchFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Video], error) {
+				return &youtube.Page[youtube.Video]{}, nil
+			},
+		}, cfg, Options{})
+		tl := m.listThumbList
+		imgR := tl.Renderer()
+
+		imgR.Store("https://fake.test/s1.jpg", "TX_S1", "PL_S1")
+		items := []list.Item{shared.VideoItem{Video: youtube.Video{
+			ID: "s1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/s1.jpg", Width: 320}},
+		}}}
+		wrapViewStabilize(tl, items, "V")
+
+		// Trigger a search → Invalidate + searching spinner.
+		m.search.SetQuery("test")
+		m.search.Refresh()
+		out := m.search.View()
+		if !strings.Contains(out, deleteAll) {
+			t.Error("search spinner should include DeleteAll via WrapView")
+		}
+	})
+}
+
+// TestVideoMode_DetailTabWrappedWithWrapView verifies that opening a video
+// detail tab clears stale list thumbnails via WrapView(nil, ...).
+func TestVideoMode_DetailTabWrappedWithWrapView(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+
+	m := New(&mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, _ string) (*youtube.Video, error) {
+			return &youtube.Video{ID: "v1", Title: "Test"}, nil
+		},
+	}, cfg, Options{})
+
+	tl := m.listThumbList
+	imgR := tl.Renderer()
+
+	// Stabilise list thumbnails.
+	imgR.Store("https://fake.test/s1.jpg", "TX_S1", "PL_S1")
+	items := []list.Item{shared.VideoItem{Video: youtube.Video{
+		ID: "s1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/s1.jpg", Width: 320}},
+	}}}
+	wrapViewStabilize(tl, items, "V")
+
+	// Open video detail tab — should Invalidate the listThumbList.
+	m.openVideoTab(&youtube.Video{ID: "v1", Title: "Test"})
+
+	// renderContent wraps detail with WrapView(nil, ...).
+	out := m.renderContent()
+	deleteAll := ytimage.DeleteAll()
+	if !strings.Contains(out, deleteAll) {
+		t.Error("detail tab should include DeleteAll to clear stale list images")
+	}
+
+	// Second render should skip (no more DeleteAll).
+	out2 := m.renderContent()
+	if strings.Contains(out2, deleteAll) {
+		t.Error("detail tab should not send DeleteAll on stable frames")
+	}
+}
+
+// TestVideoMode_SubsViewWrappedWithWrapView verifies that the subs view
+// (which has no thumbnails) clears stale images via WrapView(nil, ...).
+func TestVideoMode_SubsViewWrappedWithWrapView(t *testing.T) {
+	cfg := testConfig()
+	cfg.Thumbnails.Enabled = true
+	cfg.Thumbnails.Height = 5
+
+	m := New(&mockYTClient{authenticated: true}, cfg, Options{})
+	tl := m.listThumbList
+	imgR := tl.Renderer()
+
+	// Stabilise list thumbnails.
+	imgR.Store("https://fake.test/s1.jpg", "TX_S1", "PL_S1")
+	items := []list.Item{shared.VideoItem{Video: youtube.Video{
+		ID: "s1", Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/s1.jpg", Width: 320}},
+	}}}
+	wrapViewStabilize(tl, items, "V")
+
+	// Switch to subs — should Invalidate.
+	m.switchTo(ViewSubs)
+	m.listThumbList.Invalidate()
+
+	out := m.renderContent()
+	deleteAll := ytimage.DeleteAll()
+	if !strings.Contains(out, deleteAll) {
+		t.Error("subs view should include DeleteAll to clear stale list images")
 	}
 }

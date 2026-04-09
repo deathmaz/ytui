@@ -262,10 +262,14 @@ func (m Model) View() string {
 	inputView := inputStyle.Width(m.width).Render(m.input.View())
 
 	if m.searching {
-		return lipgloss.JoinVertical(lipgloss.Left,
+		view := lipgloss.JoinVertical(lipgloss.Left,
 			inputView,
 			m.spinner.View()+" Searching...",
 		)
+		if m.thumbList != nil {
+			return m.thumbList.WrapView(nil, view)
+		}
+		return view
 	}
 
 	view := lipgloss.JoinVertical(lipgloss.Left,

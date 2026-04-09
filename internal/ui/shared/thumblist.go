@@ -159,11 +159,20 @@ func (t *ThumbList) WrapView(items []list.Item, view string) string {
 
 	fingerprint := fp.String()
 	if fingerprint == "" {
-		// No images cached yet. If we were invalidated (view switch,
-		// loading spinner), send a bare DeleteAll to purge old images
-		// from Kitty that belong to the previous view.
+		// No images cached yet. Send a bare DeleteAll to purge stale
+		// images from Kitty if:
+		// (a) we were invalidated (view switch, loading spinner), OR
+		// (b) the previous frame had cached images but this one doesn't
+		//     (page scroll to uncached items — old virtual placements
+		//     would otherwise linger until the first new image loads).
 		if t.lastDeleteGen == 0 && t.lastFingerprint == "" {
 			thumbLog("[%p] DELETE_STALE  items=%d", t, len(seenURLs))
+			t.lastDeleteGen = globalDeleteGen.Add(1)
+			return ytimage.DeleteAll() + view
+		}
+		if t.lastFingerprint != "" {
+			thumbLog("[%p] DELETE_STALE (fp_cleared)  items=%d", t, len(seenURLs))
+			t.lastFingerprint = ""
 			t.lastDeleteGen = globalDeleteGen.Add(1)
 			return ytimage.DeleteAll() + view
 		}
