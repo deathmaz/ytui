@@ -17,6 +17,38 @@ import (
 	"github.com/deathmaz/ytui/internal/youtube"
 )
 
+// pendingState holds deferred startup actions (prior-session tab restore +
+// -open URL) embedded in Model / MusicModel. Methods are promoted so callers
+// can use m.hasPending() directly; drain needs mode-specific open/restore
+// functions so each model wraps it in a thin drainPending().
+type pendingState struct {
+	pendingOpen    *youtube.ParsedURL
+	pendingRestore []state.TabEntry
+}
+
+// drain runs restore then open so openFn has the final say on focus and can
+// dedup against restored tabs. Clears both fields.
+func (p *pendingState) drain(
+	openFn func(*youtube.ParsedURL) tea.Cmd,
+	restoreFn func([]state.TabEntry) tea.Cmd,
+) []tea.Cmd {
+	var cmds []tea.Cmd
+	if len(p.pendingRestore) > 0 {
+		cmds = append(cmds, restoreFn(p.pendingRestore))
+		p.pendingRestore = nil
+	}
+	if p.pendingOpen != nil {
+		cmds = append(cmds, openFn(p.pendingOpen))
+		p.pendingOpen = nil
+	}
+	return cmds
+}
+
+// hasPending reports whether drain would produce any cmds.
+func (p *pendingState) hasPending() bool {
+	return p.pendingOpen != nil || len(p.pendingRestore) > 0
+}
+
 // StatusManager handles status message display and auto-clear.
 type StatusManager struct {
 	Msg string
@@ -93,17 +125,14 @@ func TryAuthenticate(authenticating *bool, isAuthenticated bool, status *StatusM
 }
 
 // HandleAuthResult processes an AuthResult: runs setupFn to rebuild
-// mode-specific clients, reloads the active view, then drains pendingRestore
-// and pendingOpen (in that order, so openFn has the final say on focus).
+// mode-specific clients, reloads the active view, then drains pending actions
+// (tab restore + -open URL, in that order so openFn has the final say on focus).
 func HandleAuthResult(
 	msg AuthResult,
 	authenticating *bool,
 	status *StatusManager,
 	browser string,
-	pendingOpen **youtube.ParsedURL,
-	openFn func(*youtube.ParsedURL) tea.Cmd,
-	pendingRestore *[]state.TabEntry,
-	restoreFn func([]state.TabEntry) tea.Cmd,
+	drainPending func() []tea.Cmd,
 	setupFn func(*http.Client) error,
 	reloadActiveView func() tea.Cmd,
 	resizeViews func(),
@@ -124,14 +153,7 @@ func HandleAuthResult(
 	if reload := reloadActiveView(); reload != nil {
 		cmds = append(cmds, reload)
 	}
-	if len(*pendingRestore) > 0 {
-		cmds = append(cmds, restoreFn(*pendingRestore))
-		*pendingRestore = nil
-	}
-	if *pendingOpen != nil {
-		cmds = append(cmds, openFn(*pendingOpen))
-		*pendingOpen = nil
-	}
+	cmds = append(cmds, drainPending()...)
 	resizeViews()
 	return tea.Batch(cmds...)
 }
@@ -248,19 +270,15 @@ func handleURLInput(msg tea.Msg, u *urlinput.Model) (tea.Cmd, bool) {
 	return cmd, true
 }
 
-// initCmds builds the standard Init command batch with auth-then-open logic.
-//
-// Restore runs BEFORE open so that openFn (which focuses the newly opened tab)
-// has the final say on activeView and can dedup against restored tabs. When
-// openFn hits a restored tab it returns the deferred-load cmd itself.
+// initCmds builds the standard Init command batch. When auth_on_startup is
+// set and any action is pending, defers draining to HandleAuthResult so the
+// authenticated client is used. Otherwise drains inline.
 func initCmds(
 	authOnStartup bool,
-	pendingOpen **youtube.ParsedURL,
-	pendingRestore *[]state.TabEntry,
+	hasPending bool,
+	drainPending func() []tea.Cmd,
 	searchInit tea.Cmd,
 	authCmd func() tea.Cmd,
-	openFn func(*youtube.ParsedURL) tea.Cmd,
-	restoreFn func([]state.TabEntry) tea.Cmd,
 	searchQuery string,
 	refreshCmd func() tea.Cmd,
 ) tea.Cmd {
@@ -268,18 +286,11 @@ func initCmds(
 	cmds = append(cmds, searchInit)
 	if authOnStartup {
 		cmds = append(cmds, authCmd())
-		if *pendingOpen != nil || len(*pendingRestore) > 0 {
+		if hasPending {
 			return tea.Batch(cmds...)
 		}
 	}
-	if len(*pendingRestore) > 0 {
-		cmds = append(cmds, restoreFn(*pendingRestore))
-		*pendingRestore = nil
-	}
-	if *pendingOpen != nil {
-		cmds = append(cmds, openFn(*pendingOpen))
-		*pendingOpen = nil
-	}
+	cmds = append(cmds, drainPending()...)
 	if searchQuery != "" {
 		cmds = append(cmds, refreshCmd())
 	}

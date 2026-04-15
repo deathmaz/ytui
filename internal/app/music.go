@@ -161,8 +161,7 @@ type MusicModel struct {
 	pageLoading bool
 
 	authenticating  bool
-	pendingOpen     *youtube.ParsedURL
-	pendingRestore  []state.TabEntry
+	pendingState
 	startupWarning  string
 	status          StatusManager
 }
@@ -200,8 +199,10 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 		urlInput:    urlinput.New(),
 		spinner:     styles.NewSpinner(),
 		tabs:           NewTabSet[musicTab](maxMusicTabs, func(t *musicTab) string { return t.browseID }),
-		pendingOpen:    opts.OpenURL,
-		pendingRestore: loadSavedTabs(cfg, "music"),
+		pendingState: pendingState{
+			pendingOpen:    opts.OpenURL,
+			pendingRestore: loadSavedTabs(cfg, "music"),
+		},
 		startupWarning: opts.Warning,
 	}
 
@@ -211,12 +212,10 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 func (m *MusicModel) Init() tea.Cmd {
 	cmd := initCmds(
 		m.cfg.Auth.AuthOnStartup,
-		&m.pendingOpen,
-		&m.pendingRestore,
+		m.hasPending(),
+		m.drainPending,
 		m.search.Init(),
 		m.authenticate,
-		m.openParsedURL,
-		m.restoreTabs,
 		m.search.Query(),
 		m.search.Refresh,
 	)
@@ -583,8 +582,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AuthResult:
 		return m, HandleAuthResult(msg, &m.authenticating, &m.status, m.cfg.Auth.Browser,
-			&m.pendingOpen, m.openParsedURL,
-			&m.pendingRestore, m.restoreTabs,
+			m.drainPending,
 			func(httpClient *http.Client) error {
 				newClient, err := youtube.NewMusicClient(httpClient)
 				if err != nil {
@@ -828,6 +826,11 @@ func (m *MusicModel) activeTab() *musicTab {
 		return nil
 	}
 	return m.tabs.Active()
+}
+
+// drainPending wraps pendingState.drain with this mode's open/restore fns.
+func (m *MusicModel) drainPending() []tea.Cmd {
+	return m.drain(m.openParsedURL, m.restoreTabs)
 }
 
 func (m *MusicModel) closeActiveTab() {

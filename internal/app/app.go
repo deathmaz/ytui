@@ -93,8 +93,7 @@ type Model struct {
 	tabs TabSet[dynamicTab]
 
 	pendingVideoURL string
-	pendingOpen     *youtube.ParsedURL
-	pendingRestore  []state.TabEntry
+	pendingState
 	startupWarning  string
 	status          StatusManager
 	downloading     bool
@@ -133,8 +132,10 @@ func New(client youtube.Client, cfg *config.Config, opts Options) *Model {
 		urlInput:    urlinput.New(),
 		cfg:         cfg,
 		tabs:           NewTabSet[dynamicTab](maxDynamicTabs, func(t *dynamicTab) string { return t.id }),
-		pendingOpen:    opts.OpenURL,
-		pendingRestore: loadSavedTabs(cfg, "video"),
+		pendingState: pendingState{
+			pendingOpen:    opts.OpenURL,
+			pendingRestore: loadSavedTabs(cfg, "video"),
+		},
 		startupWarning: opts.Warning,
 	}
 }
@@ -159,12 +160,10 @@ func newVideoListSetup(cfg *config.Config) (*shared.ThumbList, list.ItemDelegate
 func (m *Model) Init() tea.Cmd {
 	cmd := initCmds(
 		m.cfg.Auth.AuthOnStartup,
-		&m.pendingOpen,
-		&m.pendingRestore,
+		m.hasPending(),
+		m.drainPending,
 		m.search.Init(),
 		m.authenticate,
-		m.openParsedURL,
-		m.restoreTabs,
 		m.search.Query(),
 		m.search.Refresh,
 	)
@@ -330,8 +329,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AuthResult:
 		return m, HandleAuthResult(msg, &m.authenticating, &m.status, m.cfg.Auth.Browser,
-			&m.pendingOpen, m.openParsedURL,
-			&m.pendingRestore, m.restoreTabs,
+			m.drainPending,
 			func(httpClient *http.Client) error {
 				newClient, err := youtube.NewInnerTubeClient(httpClient)
 				if err != nil {
@@ -423,6 +421,11 @@ func (m *Model) View() string {
 		statusLine,
 		statusBarStyle.Render(m.help.View(m.keys)),
 	)
+}
+
+// drainPending wraps pendingState.drain with this mode's open/restore fns.
+func (m *Model) drainPending() []tea.Cmd {
+	return m.drain(m.openParsedURL, m.restoreTabs)
 }
 
 // activeVideoTab returns the currently active video tab, or nil.
