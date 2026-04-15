@@ -480,6 +480,8 @@ func (m *Model) openVideoTab(v *youtube.Video) tea.Cmd {
 }
 
 func (m *Model) openChannelTab(ch youtube.Channel) tea.Cmd {
+	// No listThumbList.Invalidate() here (or in the new-tab path below):
+	// channel.Load invalidates internally.
 	if idx, found := m.tabs.Find(ch.ID); found {
 		m.activeView = ViewDynamicTab
 		m.tabs.SetActive(idx)
@@ -509,6 +511,8 @@ func (m *Model) openChannelTab(ch youtube.Channel) tea.Cmd {
 }
 
 func (m *Model) openPlaylistTab(pl youtube.Playlist) tea.Cmd {
+	// No listThumbList.Invalidate() here (or in the new-tab path below):
+	// playlist.Load invalidates internally.
 	if idx, found := m.tabs.Find(pl.ID); found {
 		m.activeView = ViewDynamicTab
 		m.tabs.SetActive(idx)
