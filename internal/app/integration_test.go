@@ -182,16 +182,7 @@ func TestGlobalKeys_Parity(t *testing.T) {
 func TestVideoMode_TabLifecycle(t *testing.T) {
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{
-				ID:    id,
-				Title: "Video " + id,
-				URL:   "https://www.youtube.com/watch?v=" + id,
-			}, nil
-		},
-		getCommentsFn: func(_ context.Context, videoID, token string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Video", nil),
 	}
 	tm := newTestVideoProgram(t, client)
 
@@ -335,9 +326,6 @@ func TestVideoMode_DetailLoadError(t *testing.T) {
 		},
 		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
 			return nil, fmt.Errorf("video not found")
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
 		},
 	}
 	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
@@ -633,12 +621,7 @@ func TestVideoMode_OpenBrowserKey(t *testing.T) {
 func TestVideoMode_MaxTabsReached(t *testing.T) {
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Video " + id, URL: "https://youtube.com/watch?v=" + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Video", nil),
 	}
 	tm := newTestVideoProgram(t, client)
 	for i := 0; i < maxDynamicTabs; i++ {
@@ -656,9 +639,6 @@ func TestVideoMode_CloseLastTabFallback(t *testing.T) {
 		authenticated: true,
 		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
 			return &youtube.Video{ID: id, Title: "Only Tab", URL: "https://youtube.com/watch?v=" + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
 		},
 	}
 	tm := newTestVideoProgram(t, client)
@@ -678,12 +658,7 @@ func TestVideoMode_CloseLastTabFallback(t *testing.T) {
 func TestVideoMode_TabNumberKeys(t *testing.T) {
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Video " + id, URL: "https://youtube.com/watch?v=" + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Video", nil),
 	}
 	tm := newTestVideoProgram(t, client)
 	// Open 3 tabs
@@ -815,12 +790,7 @@ func TestBothModes_EscClosesTab(t *testing.T) {
 	// Video: open tab, esc closes it
 	vc := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "V " + id, URL: "https://youtube.com/watch?v=" + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("V", nil),
 	}
 	vtm := newTestVideoProgram(t, vc)
 	vtm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "esc1", Title: "Esc Test"}})
@@ -1081,9 +1051,6 @@ func TestVideoMode_ChannelTabDedup(t *testing.T) {
 				},
 			}, nil
 		},
-		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
-			return &youtube.Page[youtube.Video]{}, nil
-		},
 	}
 	tm := newTestVideoProgram(t, client)
 	sendKey(tm, "2")
@@ -1106,9 +1073,6 @@ func TestVideoMode_ChannelTabDedup(t *testing.T) {
 func TestVideoMode_ChannelFromURL(t *testing.T) {
 	client := &mockYTClient{
 		authenticated: true,
-		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
-			return &youtube.Page[youtube.Video]{}, nil
-		},
 	}
 	tm := newTestVideoProgram(t, client)
 	// Simulate URL input submitting a channel URL
@@ -1822,15 +1786,7 @@ func TestVideoMode_TabPersistSaveAndRestore(t *testing.T) {
 	cfg := restoreTabsConfig(t)
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Video " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
-		getChannelVideosFn: func(_ context.Context, chID, _ string) (*youtube.Page[youtube.Video], error) {
-			return &youtube.Page[youtube.Video]{}, nil
-		},
+		getVideoFn: videoFactory("Video", nil),
 	}
 
 	// Session 1: open a video tab and a channel tab
@@ -1882,12 +1838,7 @@ func TestVideoMode_TabPersistDisabledByDefault(t *testing.T) {
 
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Video " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Video", nil),
 	}
 
 	tm := newTestVideoProgramFull(t, client, cfg, Options{})
@@ -1909,12 +1860,7 @@ func TestVideoMode_TabPersistCloseRemovesFromState(t *testing.T) {
 	cfg := restoreTabsConfig(t)
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Video " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Video", nil),
 	}
 
 	tm := newTestVideoProgramFull(t, client, cfg, Options{})
@@ -1948,15 +1894,7 @@ func TestVideoMode_PostNotPersisted(t *testing.T) {
 	cfg := restoreTabsConfig(t)
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Video " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
-		getPostCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Video", nil),
 	}
 
 	tm := newTestVideoProgramFull(t, client, cfg, Options{})
@@ -1992,20 +1930,10 @@ func TestVideoMode_PostNotPersisted(t *testing.T) {
 
 func TestMusicMode_TabPersistSaveAndRestore(t *testing.T) {
 	cfg := restoreTabsConfig(t)
-	mc := &mockMusicClient{
-		authenticated: true,
-		getArtistFn: func(_ context.Context, browseID string) (*youtube.MusicArtistPage, error) {
-			return &youtube.MusicArtistPage{Name: "Fake Artist"}, nil
-		},
-	}
+	mc := &mockMusicClient{authenticated: true}
 	ytClient := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Song " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Song", nil),
 	}
 
 	// Session 1: open a song tab via URL submit
@@ -2044,12 +1972,7 @@ func TestTabPersist_IndependentModes(t *testing.T) {
 	cfg := restoreTabsConfig(t)
 	ytClient := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Video " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Video", nil),
 	}
 	mc := &mockMusicClient{authenticated: true}
 
@@ -2135,12 +2058,7 @@ func TestVideoMode_LoadRestoredTabTriggersLoad(t *testing.T) {
 	cfg := restoreTabsConfig(t)
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Loaded", nil),
 	}
 
 	state.Save("video", &state.TabState{Tabs: []state.TabEntry{
@@ -2170,12 +2088,7 @@ func TestVideoMode_LoadRestoredTabTriggersLoad(t *testing.T) {
 func TestVideoMode_LoadRestoredTabNoopForNormalTab(t *testing.T) {
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			return &youtube.Video{ID: id, Title: "Video " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Video", nil),
 	}
 	cfg := testConfig()
 
@@ -2203,13 +2116,7 @@ func TestVideoMode_SwitchToRestoredTabLoadsContent(t *testing.T) {
 	var getVideoCalls atomic.Int32
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			getVideoCalls.Add(1)
-			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Loaded", &getVideoCalls),
 	}
 
 	// Save a video tab
@@ -2333,13 +2240,7 @@ func TestMusicMode_SwitchToRestoredSongTabLoadsContent(t *testing.T) {
 	mc := &mockMusicClient{authenticated: true}
 	ytClient := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			getVideoCalls.Add(1)
-			return &youtube.Video{ID: id, Title: "Loaded Song " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Loaded Song", &getVideoCalls),
 	}
 
 	state.Save("music", &state.TabState{Tabs: []state.TabEntry{
@@ -2404,13 +2305,7 @@ func TestVideoMode_CloseRestoredTabLoadsNextRestored(t *testing.T) {
 	var getVideoCalls atomic.Int32
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			getVideoCalls.Add(1)
-			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Loaded", &getVideoCalls),
 	}
 
 	// Save two video tabs
@@ -2445,13 +2340,7 @@ func TestMusicMode_CloseRestoredTabLoadsNextRestored(t *testing.T) {
 	mc := &mockMusicClient{authenticated: true}
 	ytClient := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			getVideoCalls.Add(1)
-			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Loaded", &getVideoCalls),
 	}
 
 	state.Save("music", &state.TabState{Tabs: []state.TabEntry{
@@ -2488,13 +2377,7 @@ func TestVideoMode_OpenURLWithRestoredTabsFocusesAndLoads(t *testing.T) {
 	var getVideoCalls atomic.Int32
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			getVideoCalls.Add(1)
-			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Loaded", &getVideoCalls),
 	}
 
 	// Simulate a previous session that saved a video tab.
@@ -2530,13 +2413,7 @@ func TestVideoMode_OpenURLTwiceEndToEnd(t *testing.T) {
 	var getVideoCalls atomic.Int32
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			getVideoCalls.Add(1)
-			return &youtube.Video{ID: id, Title: "Joy of Coding " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Joy of Coding", &getVideoCalls),
 	}
 
 	parsed := youtube.ParsedURL{Kind: youtube.URLVideo, ID: "fake_vid_reuse"}
@@ -2577,13 +2454,7 @@ func TestVideoMode_OpenURLSameAsRestoredTabLoadsContent(t *testing.T) {
 	var getVideoCalls atomic.Int32
 	client := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			getVideoCalls.Add(1)
-			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Loaded", &getVideoCalls),
 	}
 
 	// Previous session saved the same video we're about to -open.
@@ -2622,13 +2493,7 @@ func TestMusicMode_OpenURLSameAsRestoredTabLoadsContent(t *testing.T) {
 	mc := &mockMusicClient{authenticated: true}
 	ytClient := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			getVideoCalls.Add(1)
-			return &youtube.Video{ID: id, Title: "Loaded Song " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Loaded Song", &getVideoCalls),
 	}
 
 	state.Save("music", &state.TabState{Tabs: []state.TabEntry{
@@ -2666,13 +2531,7 @@ func TestMusicMode_OpenURLWithRestoredTabsFocusesAndLoads(t *testing.T) {
 	mc := &mockMusicClient{authenticated: true}
 	ytClient := &mockYTClient{
 		authenticated: true,
-		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
-			getVideoCalls.Add(1)
-			return &youtube.Video{ID: id, Title: "Loaded Song " + id}, nil
-		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
+		getVideoFn: videoFactory("Loaded Song", &getVideoCalls),
 	}
 
 	state.Save("music", &state.TabState{Tabs: []state.TabEntry{

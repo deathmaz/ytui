@@ -324,9 +324,6 @@ func TestGolden_Video_MultipleTabs(t *testing.T) {
 			v := videos[id]
 			return &v, nil
 		},
-		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
-			return &youtube.Page[youtube.Comment]{}, nil
-		},
 	}
 	// Search → results → open 3 tabs via i → back → j → i
 	tm := newTestVideoProgramFull(t, client, nil, Options{SearchQuery: "tabs"}, "tab1", "tab2", "tab3")

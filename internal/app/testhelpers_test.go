@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,7 +11,24 @@ import (
 	"github.com/charmbracelet/x/exp/teatest"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/config"
+	"github.com/deathmaz/ytui/internal/youtube"
 )
+
+// videoFactory builds a getVideoFn that returns a Video titled
+// "{titlePrefix} {id}" with a canonical URL. Counter, if non-nil, is
+// incremented per call — used by tests asserting the API was hit.
+func videoFactory(titlePrefix string, counter *atomic.Int32) func(context.Context, string) (*youtube.Video, error) {
+	return func(_ context.Context, id string) (*youtube.Video, error) {
+		if counter != nil {
+			counter.Add(1)
+		}
+		return &youtube.Video{
+			ID:    id,
+			Title: titlePrefix + " " + id,
+			URL:   "https://www.youtube.com/watch?v=" + id,
+		}, nil
+	}
+}
 
 func testConfig() *config.Config {
 	return &config.Config{
