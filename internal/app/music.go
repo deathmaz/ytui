@@ -891,7 +891,6 @@ func (m *MusicModel) restoreTabs(entries []state.TabEntry) tea.Cmd {
 			break
 		}
 	}
-	m.onFixedView = true
 	return nil
 }
 
@@ -985,7 +984,7 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 		m.onFixedView = false
 		m.tabs.SetActive(idx)
 		m.thumbList.Invalidate()
-		return nil
+		return m.loadRestoredTab()
 	}
 
 	tab := musicTab{

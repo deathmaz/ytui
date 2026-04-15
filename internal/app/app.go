@@ -457,7 +457,7 @@ func (m *Model) openVideoTab(v *youtube.Video) tea.Cmd {
 		m.activeView = ViewDynamicTab
 		m.tabs.SetActive(idx)
 		m.listThumbList.Invalidate()
-		return nil
+		return m.loadRestoredTab()
 	}
 
 	d := detail.New(m.ytClient, m.imgR)
@@ -483,7 +483,7 @@ func (m *Model) openChannelTab(ch youtube.Channel) tea.Cmd {
 	if idx, found := m.tabs.Find(ch.ID); found {
 		m.activeView = ViewDynamicTab
 		m.tabs.SetActive(idx)
-		return nil
+		return m.loadRestoredTab()
 	}
 
 	cv := channel.New(m.ytClient, m.listDelegate, m.listThumbList, m.cfg.Thumbnails)
@@ -512,7 +512,7 @@ func (m *Model) openPlaylistTab(pl youtube.Playlist) tea.Cmd {
 	if idx, found := m.tabs.Find(pl.ID); found {
 		m.activeView = ViewDynamicTab
 		m.tabs.SetActive(idx)
-		return nil
+		return m.loadRestoredTab()
 	}
 
 	pv := playlist.New(m.ytClient, m.listDelegate, m.listThumbList)
@@ -643,7 +643,6 @@ func (m *Model) restoreTabs(entries []state.TabEntry) tea.Cmd {
 			break
 		}
 	}
-	m.activeView = ViewSearch
 	return nil
 }
 

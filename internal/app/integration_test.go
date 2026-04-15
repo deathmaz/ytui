@@ -2478,3 +2478,222 @@ func TestMusicMode_CloseRestoredTabLoadsNextRestored(t *testing.T) {
 		t.Error("expected GetVideo to be called for the next restored tab after close")
 	}
 }
+
+// === -open flag + restored session tabs ===
+
+// -open must focus and load the opened tab even when a prior session restored
+// tabs first.
+func TestVideoMode_OpenURLWithRestoredTabsFocusesAndLoads(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var getVideoCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			getVideoCalls.Add(1)
+			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	// Simulate a previous session that saved a video tab.
+	state.Save("video", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindVideo, ID: "fake_vid_saved", Title: "Saved"},
+	}})
+
+	// Launch with -open pointing to a different video.
+	parsed := youtube.ParsedURL{Kind: youtube.URLVideo, ID: "fake_vid_opened"}
+	m := New(client, cfg, Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+
+	// The opened video must render its loaded title.
+	waitForContent(t, tm, "Loaded fake_vid_opened")
+
+	finalM := quitAndGetVideoModel(t, tm)
+	if finalM.activeView != ViewDynamicTab {
+		t.Errorf("activeView = %d, want ViewDynamicTab (%d)", finalM.activeView, ViewDynamicTab)
+	}
+	active := finalM.tabs.Active()
+	if active == nil || active.id != "fake_vid_opened" {
+		t.Errorf("active tab id = %v, want fake_vid_opened", active)
+	}
+	if c := getVideoCalls.Load(); c == 0 {
+		t.Error("expected GetVideo to be called for -open URL")
+	}
+}
+
+// Two sessions with the same -open URL must dedup to a single loaded tab, not
+// stack a new empty tab on top of the restored one.
+func TestVideoMode_OpenURLTwiceEndToEnd(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var getVideoCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			getVideoCalls.Add(1)
+			return &youtube.Video{ID: id, Title: "Joy of Coding " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	parsed := youtube.ParsedURL{Kind: youtube.URLVideo, ID: "fake_vid_reuse"}
+
+	// Session 1: launch with -open, wait for video to load, then quit.
+	m1 := New(client, cfg, Options{OpenURL: &parsed})
+	tm1 := teatest.NewTestModel(t, m1, teatest.WithInitialTermSize(80, 24))
+	waitForContent(t, tm1, "Joy of Coding fake_vid_reuse")
+	quitAndGetVideoModel(t, tm1)
+
+	// Verify first run persisted the tab.
+	saved, err := state.Load("video")
+	if err != nil || saved == nil || len(saved.Tabs) != 1 {
+		t.Fatalf("after session 1: saved tabs = %+v, err=%v", saved, err)
+	}
+	if saved.Tabs[0].ID != "fake_vid_reuse" {
+		t.Fatalf("saved tab ID = %q, want fake_vid_reuse", saved.Tabs[0].ID)
+	}
+
+	// Session 2: same URL again.
+	parsed2 := youtube.ParsedURL{Kind: youtube.URLVideo, ID: "fake_vid_reuse"}
+	m2 := New(client, cfg, Options{OpenURL: &parsed2})
+	tm2 := teatest.NewTestModel(t, m2, teatest.WithInitialTermSize(80, 24))
+	waitForContent(t, tm2, "Joy of Coding fake_vid_reuse")
+	finalM := quitAndGetVideoModel(t, tm2)
+
+	if finalM.tabs.Len() != 1 {
+		t.Errorf("session 2 tabs.Len() = %d, want 1 (dedup should not create a second tab)", finalM.tabs.Len())
+	}
+	if finalM.activeView != ViewDynamicTab {
+		t.Errorf("session 2 activeView = %d, want ViewDynamicTab (%d)", finalM.activeView, ViewDynamicTab)
+	}
+}
+
+// -open URL matching a restored tab must trigger its deferred load.
+func TestVideoMode_OpenURLSameAsRestoredTabLoadsContent(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var getVideoCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			getVideoCalls.Add(1)
+			return &youtube.Video{ID: id, Title: "Loaded " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	// Previous session saved the same video we're about to -open.
+	state.Save("video", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindVideo, ID: "fake_vid_same", Title: "Prev Session"},
+	}})
+
+	parsed := youtube.ParsedURL{Kind: youtube.URLVideo, ID: "fake_vid_same"}
+	m := New(client, cfg, Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+
+	waitForContent(t, tm, "Loaded fake_vid_same")
+
+	finalM := quitAndGetVideoModel(t, tm)
+	if finalM.activeView != ViewDynamicTab {
+		t.Errorf("activeView = %d, want ViewDynamicTab (%d)", finalM.activeView, ViewDynamicTab)
+	}
+	if finalM.tabs.Len() != 1 {
+		t.Errorf("tabs.Len() = %d, want 1 (dedup should not create a second tab)", finalM.tabs.Len())
+	}
+	active := finalM.tabs.Active()
+	if active == nil || active.id != "fake_vid_same" {
+		t.Errorf("active tab id = %v, want fake_vid_same", active)
+	}
+	if active != nil && active.needsLoad {
+		t.Error("active tab still has needsLoad = true; load was never triggered")
+	}
+	if c := getVideoCalls.Load(); c == 0 {
+		t.Error("expected GetVideo call for -open URL matching restored tab")
+	}
+}
+
+func TestMusicMode_OpenURLSameAsRestoredTabLoadsContent(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var getVideoCalls atomic.Int32
+	mc := &mockMusicClient{authenticated: true}
+	ytClient := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			getVideoCalls.Add(1)
+			return &youtube.Video{ID: id, Title: "Loaded Song " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	state.Save("music", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindSong, ID: "fake_song_same", Title: "Prev Session"},
+	}})
+
+	parsed := youtube.ParsedURL{Kind: youtube.URLVideo, ID: "fake_song_same"}
+	m := NewMusic(mc, ytClient, cfg, nil, Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+
+	waitForContent(t, tm, "Loaded Song fake_song_same")
+
+	finalM := quitAndGetMusicModel(t, tm)
+	if finalM.onFixedView {
+		t.Error("onFixedView = true, want false")
+	}
+	if finalM.tabs.Len() != 1 {
+		t.Errorf("tabs.Len() = %d, want 1", finalM.tabs.Len())
+	}
+	active := finalM.tabs.Active()
+	if active == nil || active.browseID != "fake_song_same" {
+		t.Errorf("active tab browseID = %v, want fake_song_same", active)
+	}
+	if active != nil && active.needsLoad {
+		t.Error("active tab still has needsLoad = true; load was never triggered")
+	}
+	if c := getVideoCalls.Load(); c == 0 {
+		t.Error("expected GetVideo call for -open URL matching restored song tab")
+	}
+}
+
+func TestMusicMode_OpenURLWithRestoredTabsFocusesAndLoads(t *testing.T) {
+	cfg := restoreTabsConfig(t)
+	var getVideoCalls atomic.Int32
+	mc := &mockMusicClient{authenticated: true}
+	ytClient := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			getVideoCalls.Add(1)
+			return &youtube.Video{ID: id, Title: "Loaded Song " + id}, nil
+		},
+		getCommentsFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Comment], error) {
+			return &youtube.Page[youtube.Comment]{}, nil
+		},
+	}
+
+	state.Save("music", &state.TabState{Tabs: []state.TabEntry{
+		{Kind: state.KindSong, ID: "fake_song_saved", Title: "Saved Song"},
+	}})
+
+	parsed := youtube.ParsedURL{Kind: youtube.URLVideo, ID: "fake_song_opened"}
+	m := NewMusic(mc, ytClient, cfg, nil, Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+
+	waitForContent(t, tm, "Loaded Song fake_song_opened")
+
+	finalM := quitAndGetMusicModel(t, tm)
+	if finalM.onFixedView {
+		t.Errorf("onFixedView = true, want false (opened tab should be focused)")
+	}
+	active := finalM.tabs.Active()
+	if active == nil || active.browseID != "fake_song_opened" {
+		t.Errorf("active tab browseID = %v, want fake_song_opened", active)
+	}
+	if c := getVideoCalls.Load(); c == 0 {
+		t.Error("expected GetVideo to be called for -open URL in music mode")
+	}
+}

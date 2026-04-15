@@ -92,10 +92,9 @@ func TryAuthenticate(authenticating *bool, isAuthenticated bool, status *StatusM
 	}
 }
 
-// HandleAuthResult processes an AuthResult message with the shared pattern:
-// check error, run mode-specific setup, set status, reload active view, handle
-// pendingOpen. setupFn constructs mode-specific clients and resets state;
-// reloadActiveView returns a cmd to load the currently focused view (or nil).
+// HandleAuthResult processes an AuthResult: runs setupFn to rebuild
+// mode-specific clients, reloads the active view, then drains pendingRestore
+// and pendingOpen (in that order, so openFn has the final say on focus).
 func HandleAuthResult(
 	msg AuthResult,
 	authenticating *bool,
@@ -125,13 +124,13 @@ func HandleAuthResult(
 	if reload := reloadActiveView(); reload != nil {
 		cmds = append(cmds, reload)
 	}
-	if *pendingOpen != nil {
-		cmds = append(cmds, openFn(*pendingOpen))
-		*pendingOpen = nil
-	}
 	if len(*pendingRestore) > 0 {
 		cmds = append(cmds, restoreFn(*pendingRestore))
 		*pendingRestore = nil
+	}
+	if *pendingOpen != nil {
+		cmds = append(cmds, openFn(*pendingOpen))
+		*pendingOpen = nil
 	}
 	resizeViews()
 	return tea.Batch(cmds...)
@@ -250,6 +249,10 @@ func handleURLInput(msg tea.Msg, u *urlinput.Model) (tea.Cmd, bool) {
 }
 
 // initCmds builds the standard Init command batch with auth-then-open logic.
+//
+// Restore runs BEFORE open so that openFn (which focuses the newly opened tab)
+// has the final say on activeView and can dedup against restored tabs. When
+// openFn hits a restored tab it returns the deferred-load cmd itself.
 func initCmds(
 	authOnStartup bool,
 	pendingOpen **youtube.ParsedURL,
@@ -269,13 +272,13 @@ func initCmds(
 			return tea.Batch(cmds...)
 		}
 	}
-	if *pendingOpen != nil {
-		cmds = append(cmds, openFn(*pendingOpen))
-		*pendingOpen = nil
-	}
 	if len(*pendingRestore) > 0 {
 		cmds = append(cmds, restoreFn(*pendingRestore))
 		*pendingRestore = nil
+	}
+	if *pendingOpen != nil {
+		cmds = append(cmds, openFn(*pendingOpen))
+		*pendingOpen = nil
 	}
 	if searchQuery != "" {
 		cmds = append(cmds, refreshCmd())
