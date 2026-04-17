@@ -22,6 +22,11 @@ type Client interface {
 	// GetFeed returns the authenticated user's subscription feed.
 	GetFeed(ctx context.Context, pageToken string) (*Page[Video], error)
 
+	// GetChannel returns header/metadata (name, handle, subscriber/video counts,
+	// description, and the signed-in user's subscription state) for a channel.
+	// Accepts either a UC channel ID or an @handle.
+	GetChannel(ctx context.Context, channelID string) (*ChannelDetail, error)
+
 	// GetChannelVideos returns videos from a channel.
 	GetChannelVideos(ctx context.Context, channelID string, pageToken string) (*Page[Video], error)
 

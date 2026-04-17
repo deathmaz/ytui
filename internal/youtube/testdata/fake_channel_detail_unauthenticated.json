@@ -1,0 +1,44 @@
+{
+  "metadata": {
+    "channelMetadataRenderer": {
+      "externalId": "UCfake000000000noauth_EF",
+      "title": "No Auth Channel",
+      "description": "Rendered without signed-in state.",
+      "vanityChannelUrl": "http://www.youtube.com/@noauth",
+      "avatar": {
+        "thumbnails": [{"url": "https://fake.test/noauth.jpg"}]
+      }
+    }
+  },
+  "header": {
+    "pageHeaderRenderer": {
+      "pageTitle": "No Auth Channel",
+      "content": {
+        "pageHeaderViewModel": {
+          "metadata": {
+            "contentMetadataViewModel": {
+              "metadataRows": [
+                {"metadataParts": [{"text": {"content": "@noauth"}}]},
+                {"metadataParts": [
+                  {"text": {"content": "500 subscribers"}},
+                  {"text": {"content": "8 videos"}}
+                ]}
+              ]
+            }
+          },
+          "actions": {
+            "flexibleActionsViewModel": {
+              "actionsRows": [
+                {"actions": [
+                  {"subscribeButtonViewModel": {
+                    "channelId": "UCfake000000000noauth_EF"
+                  }}
+                ]}
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

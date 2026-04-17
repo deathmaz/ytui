@@ -24,6 +24,7 @@ type mockYTClient struct {
 	getChannelStreamsFn   func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error)
 	getPlaylistVideosFn   func(ctx context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error)
 	getPostCommentsFn     func(ctx context.Context, postID, token string) (*youtube.Page[youtube.Comment], error)
+	getChannelFn          func(ctx context.Context, channelID string) (*youtube.ChannelDetail, error)
 
 	// Call tracking
 	feedCalls   []string // tokens passed to GetFeed
@@ -88,6 +89,13 @@ func (m *mockYTClient) GetFeed(ctx context.Context, token string) (*youtube.Page
 		return nil, fmt.Errorf("authentication required for subscription feed")
 	}
 	return &youtube.Page[youtube.Video]{}, nil
+}
+
+func (m *mockYTClient) GetChannel(ctx context.Context, channelID string) (*youtube.ChannelDetail, error) {
+	if m.getChannelFn != nil {
+		return m.getChannelFn(ctx, channelID)
+	}
+	return &youtube.ChannelDetail{Channel: youtube.Channel{ID: channelID}}, nil
 }
 
 func (m *mockYTClient) GetChannelVideos(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {

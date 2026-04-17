@@ -1,0 +1,68 @@
+{
+  "metadata": {
+    "channelMetadataRenderer": {
+      "externalId": "UCfake987654321zyxwvu_CD",
+      "title": "Another Fake Channel",
+      "description": "",
+      "vanityChannelUrl": "http://www.youtube.com/@anotherfake",
+      "avatar": {
+        "thumbnails": [
+          {"url": "https://fake.test/avatar2.jpg"}
+        ]
+      }
+    }
+  },
+  "header": {
+    "pageHeaderRenderer": {
+      "pageTitle": "Another Fake Channel",
+      "content": {
+        "pageHeaderViewModel": {
+          "metadata": {
+            "contentMetadataViewModel": {
+              "metadataRows": [
+                {"metadataParts": [{"text": {"content": "@anotherfake"}}]},
+                {"metadataParts": [
+                  {"text": {"content": "4.5K subscribers"}},
+                  {"text": {"content": "17 videos"}}
+                ]}
+              ]
+            }
+          },
+          "description": {
+            "descriptionPreviewViewModel": {
+              "description": {"content": "Fallback description only in header."}
+            }
+          },
+          "actions": {
+            "flexibleActionsViewModel": {
+              "actionsRows": [
+                {"actions": [
+                  {"subscribeButtonViewModel": {
+                    "channelId": "UCfake987654321zyxwvu_CD",
+                    "stateEntityStoreKey": "fake_state_key_02"
+                  }}
+                ]}
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "frameworkUpdates": {
+    "entityBatchUpdate": {
+      "mutations": [
+        {
+          "entityKey": "fake_state_key_02",
+          "payload": {
+            "subscriptionStateEntity": {
+              "key": "fake_state_key_02",
+              "subscribed": false
+            }
+          },
+          "type": "ENTITY_MUTATION_TYPE_REPLACE"
+        }
+      ]
+    }
+  }
+}

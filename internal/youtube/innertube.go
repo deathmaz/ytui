@@ -42,6 +42,11 @@ func MusicPlaylistURL(id string) string {
 	return "https://music.youtube.com/playlist?list=" + id
 }
 
+// ChannelURL returns the canonical channel URL for a UC channel ID.
+func ChannelURL(id string) string {
+	return "https://www.youtube.com/channel/" + id
+}
+
 // URLKind identifies the type of YouTube URL.
 type URLKind int
 
@@ -277,6 +282,13 @@ func enrichVideo(v *Video, raw map[string]interface{}) {
 			if desc := vsir.Get("attributedDescription.content"); desc.Exists() {
 				v.Description = desc.String()
 			}
+			// Signed-in user's subscription state for this video's channel.
+			// Unauthenticated responses omit the renderer, so a missing field
+			// is distinct from a false value.
+			if sb := vsir.Get("subscribeButton.subscribeButtonRenderer"); sb.Exists() {
+				v.ChannelSubscribed = sb.Get("subscribed").Bool()
+				v.ChannelSubscribedKnown = true
+			}
 		}
 		return true
 	})
@@ -494,7 +506,7 @@ func parseChannelSections(sections gjson.Result, channels *[]Channel, nextToken 
 					Name:            cr.Get("title.simpleText").String(),
 					Handle:          handle,
 					SubscriberCount: subCount,
-					URL:             "https://www.youtube.com/channel/" + cr.Get("channelId").String(),
+					URL:             ChannelURL(cr.Get("channelId").String()),
 				}
 				ch.Thumbnails = parseThumbnails(cr.Get("thumbnail.thumbnails"))
 				*channels = append(*channels, ch)
@@ -576,7 +588,7 @@ const (
 	channelVideosParams    = "EgZ2aWRlb3PyBgQKAjoA"
 	channelPlaylistsParams = "EglwbGF5bGlzdHPyBgQKAkIA"
 	channelPostsParams     = "EgVwb3N0c_IGBAoCSgA="
-	channelStreamsParams    = "EgdzdHJlYW1z8gYECgJ6AA"
+	channelStreamsParams   = "EgdzdHJlYW1z8gYECgJ6AA"
 )
 
 // browseChannelTab calls Browse for a channel tab. On initial load it sends
@@ -902,11 +914,11 @@ func parseBackstagePost(bpr gjson.Result) Post {
 	})
 
 	p := Post{
-		ID:         bpr.Get("postId").String(),
-		AuthorName: bpr.Get("authorText.runs.0.text").String(),
-		AuthorID:   bpr.Get("authorEndpoint.browseEndpoint.browseId").String(),
-		Content:    b.String(),
-		LikeCount:  bpr.Get("voteCount.simpleText").String(),
+		ID:          bpr.Get("postId").String(),
+		AuthorName:  bpr.Get("authorText.runs.0.text").String(),
+		AuthorID:    bpr.Get("authorEndpoint.browseEndpoint.browseId").String(),
+		Content:     b.String(),
+		LikeCount:   bpr.Get("voteCount.simpleText").String(),
 		PublishedAt: bpr.Get("publishedTimeText.runs.0.text").String(),
 	}
 
@@ -1073,6 +1085,13 @@ var parsePostCommentsResponse = parseCommentsResponse
 
 func (c *InnerTubeClient) IsAuthenticated() bool {
 	return c.authenticated
+}
+
+// callRaw invokes an arbitrary InnerTube endpoint. Used for endpoints the
+// innertube-go library does not expose directly (NAVIGATION/RESOLVE_URL,
+// BROWSE with bare browseId, upcoming SUBSCRIPTION/*).
+func (c *InnerTubeClient) callRaw(ctx context.Context, endpoint string, body map[string]interface{}) (map[string]interface{}, error) {
+	return c.it.Call(ctx, endpoint, nil, body)
 }
 
 // parseSearchResponse extracts videos from an InnerTube search response.

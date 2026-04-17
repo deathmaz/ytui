@@ -15,6 +15,12 @@ type Video struct {
 	CommentsToken   string
 	Thumbnails      []Thumbnail
 	URL             string
+
+	// ChannelSubscribed reflects the signed-in user's subscription state for
+	// this video's channel. Only meaningful when ChannelSubscribedKnown is
+	// true (unauthenticated responses omit the subscribe button).
+	ChannelSubscribed      bool
+	ChannelSubscribedKnown bool
 }
 
 // Channel represents a YouTube channel.
@@ -26,6 +32,19 @@ type Channel struct {
 	SubscriberCount string
 	Thumbnails      []Thumbnail
 	URL             string
+}
+
+// ChannelDetail extends Channel with fields surfaced only by the channel
+// page header response (GetChannel).
+type ChannelDetail struct {
+	Channel
+	VideoCount string
+
+	// Subscribed reflects the signed-in user's subscription state. Only
+	// meaningful when SubscribedKnown is true (unauthenticated responses
+	// omit the state entity).
+	Subscribed      bool
+	SubscribedKnown bool
 }
 
 // Comment represents a YouTube comment.
