@@ -227,6 +227,45 @@ func TestGolden_Video_Detail_Info(t *testing.T) {
 	waitThenCapture(t, tm, "1.5M views")
 }
 
+func TestGolden_Video_Detail_SubscribedIndicator(t *testing.T) {
+	client := detailIndicatorClient("d1", "Test Video", "Test Channel", "UCtest", true)
+	tm := newTestVideoProgramFull(t, client, nil, Options{SearchQuery: "test"}, "d1")
+	waitForContent(t, tm, "Test Video")
+	sendKey(tm, "i")
+	waitThenCapture(t, tm, "✓ Subscribed")
+}
+
+func TestGolden_Video_Detail_NotSubscribedIndicator(t *testing.T) {
+	client := detailIndicatorClient("d2", "Another Video", "Other Channel", "UCother", false)
+	tm := newTestVideoProgramFull(t, client, nil, Options{SearchQuery: "test"}, "d2")
+	waitForContent(t, tm, "Another Video")
+	sendKey(tm, "i")
+	waitThenCapture(t, tm, "○ Not subscribed")
+}
+
+// detailIndicatorClient builds a mock client whose search returns one video
+// and whose getVideo returns a fully-populated Video with the given
+// subscription state. Shared by the subscribe-indicator goldens and the
+// flip-in-place integration tests.
+func detailIndicatorClient(videoID, title, channelName, channelID string, subscribed bool) *mockYTClient {
+	return &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: videoID, Title: title, ChannelName: channelName, ChannelID: channelID}},
+			}, nil
+		},
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{
+				ID: id, Title: title, ChannelName: channelName, ChannelID: channelID,
+				SubscriberCount: "1M subscribers", ViewCount: "1K views", DurationStr: "5:00",
+				ChannelSubscribed:      subscribed,
+				ChannelSubscribedKnown: true,
+			}, nil
+		},
+	}
+}
+
 func TestGolden_Video_Detail_Comments(t *testing.T) {
 	client := &mockYTClient{
 		authenticated: true,

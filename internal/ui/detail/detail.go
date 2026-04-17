@@ -315,6 +315,9 @@ func (m *Model) renderInfo() string {
 	if v.SubscriberCount != "" {
 		channel += styles.Subtitle.Render("  " + v.SubscriberCount)
 	}
+	if ind := styles.SubscriptionIndicator(v.ChannelSubscribedKnown, v.ChannelSubscribed); ind != "" {
+		channel += "  " + ind
+	}
 	b.WriteString(channel)
 	b.WriteString("\n\n")
 
@@ -348,7 +351,7 @@ func (m *Model) renderInfo() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(styles.Dim.Render("[p] play  [d] download  [o] open in browser  [y] copy URL  [c] channel  [tab] comments  [esc] back"))
+	b.WriteString(styles.Dim.Render("[p] play  [d] download  [o] open in browser  [y] copy URL  [c] channel  [S] subscribe  [tab] comments  [esc] back"))
 
 	return b.String()
 }

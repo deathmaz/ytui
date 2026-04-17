@@ -2727,3 +2727,77 @@ func TestVideoMode_UnauthenticatedSubscribeBlocked(t *testing.T) {
 		t.Error("picker should not be active after unauthenticated subscribe attempt")
 	}
 }
+
+// TestVideoMode_SubscribeFromVideoDetailFlipsIndicator opens a video detail,
+// presses S, confirms, and asserts the indicator on the active video flipped
+// in place without requiring a refetch.
+func TestVideoMode_SubscribeFromVideoDetailFlipsIndicator(t *testing.T) {
+	var subscribeCalls atomic.Int32
+	client := detailIndicatorClient("dv1", "Detail Video", "Detail Channel", "UCdetail", false)
+	client.subscribeFn = func(_ context.Context, channelID string) error {
+		if channelID != "UCdetail" {
+			t.Errorf("Subscribe called with %q, want UCdetail", channelID)
+		}
+		subscribeCalls.Add(1)
+		return nil
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	waitForContent(t, tm, "Detail Video")
+	sendKey(tm, "i")
+	waitForContent(t, tm, "○ Not subscribed")
+
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Subscription")
+	sendSpecialKey(tm, tea.KeyEnter)
+	// Indicator flip is the user-visible proof that propagation ran; the
+	// status line asserts separately in goldens. waitForContent consumes its
+	// reader on each call, so only one post-action wait is safe here.
+	waitForContent(t, tm, "✓ Subscribed")
+
+	m := quitAndGetVideoModel(t, tm)
+	if subscribeCalls.Load() != 1 {
+		t.Fatalf("Subscribe calls = %d, want 1", subscribeCalls.Load())
+	}
+	tab := m.tabs.Active()
+	if tab == nil || tab.kind != tabVideo {
+		t.Fatalf("active tab = %+v, want video detail", tab)
+	}
+	v := tab.detail.Video()
+	if v == nil || !v.ChannelSubscribedKnown || !v.ChannelSubscribed {
+		t.Errorf("video state not flipped: %+v", v)
+	}
+}
+
+func TestVideoMode_UnsubscribeFromVideoDetailFlipsIndicator(t *testing.T) {
+	var unsubscribeCalls atomic.Int32
+	client := detailIndicatorClient("dv2", "Sub Video", "Sub Channel", "UCsub", true)
+	client.unsubscribeFn = func(_ context.Context, channelID string) error {
+		if channelID != "UCsub" {
+			t.Errorf("Unsubscribe called with %q, want UCsub", channelID)
+		}
+		unsubscribeCalls.Add(1)
+		return nil
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	waitForContent(t, tm, "Sub Video")
+	sendKey(tm, "i")
+	waitForContent(t, tm, "✓ Subscribed")
+
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Subscription")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "○ Not subscribed")
+
+	m := quitAndGetVideoModel(t, tm)
+	if unsubscribeCalls.Load() != 1 {
+		t.Fatalf("Unsubscribe calls = %d, want 1", unsubscribeCalls.Load())
+	}
+	tab := m.tabs.Active()
+	if tab == nil || tab.kind != tabVideo {
+		t.Fatalf("active tab = %+v, want video detail", tab)
+	}
+	v := tab.detail.Video()
+	if v == nil || !v.ChannelSubscribedKnown || v.ChannelSubscribed {
+		t.Errorf("video state not flipped: %+v", v)
+	}
+}
