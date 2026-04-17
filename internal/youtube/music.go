@@ -133,7 +133,7 @@ func (c *MusicClient) GetHome(ctx context.Context) ([]MusicShelf, error) {
 
 // LibrarySection identifies a section of the user's YouTube Music library.
 type LibrarySection struct {
-	Title   string
+	Title    string
 	BrowseID string
 }
 
@@ -147,7 +147,7 @@ var LibrarySections = []LibrarySection{
 
 // LibrarySectionResult holds items and an optional continuation token.
 type LibrarySectionResult struct {
-	Items       []MusicItem
+	Items        []MusicItem
 	Continuation string
 }
 
@@ -435,9 +435,9 @@ func (c *MusicClient) GetAlbum(ctx context.Context, browseID string) (*MusicAlbu
 			dur := mrlir.Get("fixedColumns.0.musicResponsiveListItemFixedColumnRenderer.text.runs.0.text").String()
 
 			page.Tracks = append(page.Tracks, MusicItem{
-				Type:    MusicSong,
-				Title:   title,
-				VideoID: vid,
+				Type:     MusicSong,
+				Title:    title,
+				VideoID:  vid,
 				Subtitle: dur,
 			})
 			return true
