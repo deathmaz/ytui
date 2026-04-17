@@ -47,6 +47,13 @@ type Client interface {
 	// On continuation, pass the NextToken as pageToken (detailParams is ignored).
 	GetPostComments(ctx context.Context, detailParams string, pageToken string) (*Page[Comment], error)
 
+	// Subscribe subscribes the signed-in user to a channel. Requires auth.
+	Subscribe(ctx context.Context, channelID string) error
+
+	// Unsubscribe removes the signed-in user's subscription from a channel.
+	// Requires auth.
+	Unsubscribe(ctx context.Context, channelID string) error
+
 	// IsAuthenticated reports whether the client has valid credentials.
 	IsAuthenticated() bool
 }

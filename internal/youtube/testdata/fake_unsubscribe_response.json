@@ -1,0 +1,32 @@
+{
+  "actions": [
+    {
+      "removeFromGuideSectionAction": {
+        "guideEntryId": "UCfake123456789abcdef_AB",
+        "handlerData": "GUIDE_ACTION_REMOVE_FROM_SUBSCRIPTIONS"
+      }
+    },
+    {
+      "updateSubscribeButtonAction": {
+        "channelId": "UCfake123456789abcdef_AB",
+        "subscribed": false
+      }
+    }
+  ],
+  "frameworkUpdates": {
+    "entityBatchUpdate": {
+      "mutations": [
+        {
+          "entityKey": "fake_state_key_01",
+          "payload": {
+            "subscriptionStateEntity": {
+              "key": "fake_state_key_01",
+              "subscribed": false
+            }
+          },
+          "type": "ENTITY_MUTATION_TYPE_REPLACE"
+        }
+      ]
+    }
+  }
+}

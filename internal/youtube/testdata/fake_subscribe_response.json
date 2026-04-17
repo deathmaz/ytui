@@ -1,0 +1,41 @@
+{
+  "actions": [
+    {
+      "addToGuideSectionAction": {
+        "handlerData": "GUIDE_ACTION_ADD_TO_SUBSCRIPTIONS"
+      }
+    },
+    {
+      "openPopupAction": {
+        "popup": {
+          "notificationActionRenderer": {
+            "responseText": {"runs": [{"text": "Subscription added"}]}
+          }
+        },
+        "popupType": "TOAST"
+      }
+    },
+    {
+      "updateSubscribeButtonAction": {
+        "channelId": "UCfake123456789abcdef_AB",
+        "subscribed": true
+      }
+    }
+  ],
+  "frameworkUpdates": {
+    "entityBatchUpdate": {
+      "mutations": [
+        {
+          "entityKey": "fake_state_key_01",
+          "payload": {
+            "subscriptionStateEntity": {
+              "key": "fake_state_key_01",
+              "subscribed": true
+            }
+          },
+          "type": "ENTITY_MUTATION_TYPE_REPLACE"
+        }
+      ]
+    }
+  }
+}
