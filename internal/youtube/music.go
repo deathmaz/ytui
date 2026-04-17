@@ -153,7 +153,19 @@ var LibrarySections = []LibrarySection{
 	{"Playlists", "FEmusic_liked_playlists"},
 	{"Songs", "FEmusic_liked_videos"},
 	{"Albums", "FEmusic_liked_albums"},
-	{"Subscriptions", "FEmusic_library_corpus_artists"},
+	{"Subscriptions", LibrarySubscriptionsBrowseID},
+}
+
+// LibrarySubscriptionsBrowseID is the stable InnerTube browseID for the
+// signed-in user's followed artists. Used by the music library and by
+// unsubscribe propagation to locate the section by ID rather than title.
+const LibrarySubscriptionsBrowseID = "FEmusic_library_corpus_artists"
+
+// ChannelIDFromArtistBrowseID strips the "MPLA" prefix common to
+// music-library artist rows (BrowseID "MPLAUCxxx") so callers get the bare
+// UC channel ID. Non-MPLA inputs are returned unchanged.
+func ChannelIDFromArtistBrowseID(browseID string) string {
+	return strings.TrimPrefix(browseID, "MPLA")
 }
 
 // LibrarySectionResult holds items and an optional continuation token.

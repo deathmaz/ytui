@@ -2939,6 +2939,81 @@ func TestMusicMode_SubscribeFromArtistAboutFlipsIndicator(t *testing.T) {
 	}
 }
 
+// TestMusicMode_UnsubscribeFromArtistRemovesFromLibrary asserts that
+// unsubscribing drops the corresponding row from the Library > Subscriptions
+// list without a manual refresh.
+func TestMusicMode_UnsubscribeFromArtistRemovesFromLibrary(t *testing.T) {
+	var unsubscribeCalls atomic.Int32
+	mc := &mockMusicClient{
+		authenticated: true,
+		getLibSecFn: func(_ context.Context, browseID string) (*youtube.LibrarySectionResult, error) {
+			if browseID != "FEmusic_library_corpus_artists" {
+				return &youtube.LibrarySectionResult{}, nil
+			}
+			return &youtube.LibrarySectionResult{
+				Items: []youtube.MusicItem{
+					{Title: "Artist One", Type: youtube.MusicArtist, BrowseID: "MPLAUCone"},
+					{Title: "Artist Two", Type: youtube.MusicArtist, BrowseID: "MPLAUCtwo"},
+				},
+			}, nil
+		},
+		getArtistFn: func(_ context.Context, _ string) (*youtube.MusicArtistPage, error) {
+			return &youtube.MusicArtistPage{
+				Name: "Artist One", ChannelID: "UCone",
+				Subscribed: true, SubscribedKnown: true,
+			}, nil
+		},
+	}
+	ytc := &mockYTClient{
+		authenticated: true,
+		unsubscribeFn: func(_ context.Context, channelID string) error {
+			if channelID != "UCone" {
+				t.Errorf("Unsubscribe channelID = %q, want UCone", channelID)
+			}
+			unsubscribeCalls.Add(1)
+			return nil
+		},
+	}
+	parsed := youtube.ParsedURL{Kind: youtube.URLChannel, ID: "UCone"}
+	m := NewMusic(mc, ytc, testConfig(), ytimage.NewRenderer(), Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	waitForContent(t, tm, "✓ Subscribed")
+
+	// Trigger library load and give the parallel section fetches time to
+	// populate m.librarySubs (including Subscriptions at index 3).
+	sendKey(tm, "2")
+	time.Sleep(300 * time.Millisecond)
+	// Return to artist tab and unsubscribe.
+	sendKey(tm, "4")
+	time.Sleep(100 * time.Millisecond)
+	sendKey(tm, "S")
+	time.Sleep(150 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "○ Not subscribed")
+
+	mm := quitAndGetMusicModel(t, tm)
+	if unsubscribeCalls.Load() != 1 {
+		t.Fatalf("Unsubscribe calls = %d, want 1", unsubscribeCalls.Load())
+	}
+	var subs *subTab
+	for i, sec := range youtube.LibrarySections {
+		if sec.Title == "Subscriptions" && i < len(mm.librarySubs) {
+			subs = &mm.librarySubs[i]
+			break
+		}
+	}
+	if subs == nil {
+		t.Fatal("Subscriptions section not loaded")
+	}
+	for _, it := range subs.list.Items() {
+		if mi, ok := it.(musicItem); ok {
+			if youtube.ChannelIDFromArtistBrowseID(mi.item.BrowseID) == "UCone" {
+				t.Errorf("UCone row still present in Subscriptions; items = %+v", subs.list.Items())
+			}
+		}
+	}
+}
+
 // TestMusicMode_UnauthenticatedSubscribeBlocked asserts S without auth shows
 // the prompt and issues no Subscribe call.
 func TestMusicMode_UnauthenticatedSubscribeBlocked(t *testing.T) {

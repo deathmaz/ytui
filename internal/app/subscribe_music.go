@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/deathmaz/ytui/internal/ui/picker"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -27,10 +28,10 @@ func (m *MusicModel) resolveSubscribeTarget() *subscribeTarget {
 					}
 				}
 			case musicTabArtist:
-				// Subscribe requires a real UC channel ID. browseID on a
-				// music artist is commonly prefixed (MPLA...) and will be
-				// rejected by the endpoint, so we only use it as a last
-				// resort when its shape matches a UC ID.
+				// Subscribe requires a real UC channel ID. Artist browseIDs
+				// are often MPLA-prefixed; strip the prefix and only
+				// accept UC-shaped results so the endpoint never gets a
+				// browse-only ID.
 				t := &subscribeTarget{name: tab.title}
 				if p := tab.artistPage; p != nil {
 					t.channelID = p.ChannelID
@@ -40,8 +41,10 @@ func (m *MusicModel) resolveSubscribeTarget() *subscribeTarget {
 					t.known = p.SubscribedKnown
 					t.subscribed = p.Subscribed
 				}
-				if t.channelID == "" && strings.HasPrefix(tab.browseID, "UC") {
-					t.channelID = tab.browseID
+				if t.channelID == "" {
+					if id := youtube.ChannelIDFromArtistBrowseID(tab.browseID); strings.HasPrefix(id, "UC") {
+						t.channelID = id
+					}
 				}
 				if t.channelID == "" {
 					return nil
@@ -84,8 +87,9 @@ func (m *MusicModel) handleSubscribeResult(msg subscribeResultMsg) tea.Cmd {
 
 // propagateSubscription fans a subscription state change out to every open
 // music tab that references the channel: song tabs via the shared
-// detail.Model, artist tabs via the About header. Artist tabs match on the
-// parsed ChannelID (falling back to browseID when it equals the UC ID).
+// detail.Model, artist tabs via the About header. Also filters the Library
+// > Subscriptions list on unsubscribe so the user sees the effect without a
+// manual refresh.
 func (m *MusicModel) propagateSubscription(channelID string, subscribed bool) {
 	for i := range m.tabs.All() {
 		tab := m.tabs.At(i)
@@ -104,5 +108,40 @@ func (m *MusicModel) propagateSubscription(channelID string, subscribed bool) {
 				p.SubscribedKnown = true
 			}
 		}
+	}
+	if !subscribed {
+		m.removeLibrarySubscription(channelID)
+	}
+}
+
+// removeLibrarySubscription drops the row matching channelID from the
+// Library > Subscriptions list. No-op when the library hasn't been loaded
+// or the row isn't present.
+func (m *MusicModel) removeLibrarySubscription(channelID string) {
+	subsIdx := -1
+	for i, sec := range youtube.LibrarySections {
+		if sec.BrowseID == youtube.LibrarySubscriptionsBrowseID {
+			subsIdx = i
+			break
+		}
+	}
+	if subsIdx < 0 || subsIdx >= len(m.librarySubs) {
+		return
+	}
+	sub := &m.librarySubs[subsIdx]
+	existing := sub.list.Items()
+	// Allocate a fresh slice rather than filtering in place — bubbles/list's
+	// Items() returns the internal backing slice, so existing[:0] would alias
+	// and stale-write the tail until SetItems runs.
+	filtered := make([]list.Item, 0, len(existing))
+	for _, it := range existing {
+		mi, ok := it.(musicItem)
+		if ok && youtube.ChannelIDFromArtistBrowseID(mi.item.BrowseID) == channelID {
+			continue
+		}
+		filtered = append(filtered, it)
+	}
+	if len(filtered) != len(existing) {
+		sub.list.SetItems(filtered)
 	}
 }
