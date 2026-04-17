@@ -1120,6 +1120,91 @@ func TestGolden_Video_Channel_Streams_WithThumbnails(t *testing.T) {
 	waitThenCapture(t, tm, "Friday Night Stream")
 }
 
+func TestGolden_Video_Channel_About_Subscribed(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{{ID: "UCfake_ch_001", Name: "Fake Channel"}},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cv1", Title: "A Video", ChannelName: "Fake Channel"}},
+			}, nil
+		},
+		getChannelFn: func(_ context.Context, channelID string) (*youtube.ChannelDetail, error) {
+			return &youtube.ChannelDetail{
+				Channel: youtube.Channel{
+					ID:              "UCfake_ch_001",
+					Name:            "Fake Channel",
+					Handle:          "@fakechannel",
+					Description:     "A synthetic channel used in golden tests.",
+					SubscriberCount: "1.2M subscribers",
+				},
+				VideoCount:      "123 videos",
+				Subscribed:      true,
+				SubscribedKnown: true,
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendSpecialKey(tm, tea.KeyTab) // playlists
+	time.Sleep(150 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab) // posts
+	time.Sleep(150 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab) // livestreams
+	time.Sleep(150 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab) // about
+	waitThenCapture(t, tm, "Subscribed")
+}
+
+func TestGolden_Video_Channel_About_NotSubscribed(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, token string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{{ID: "UCfake_ch_002", Name: "Another Channel"}},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cv2", Title: "Other Video", ChannelName: "Another Channel"}},
+			}, nil
+		},
+		getChannelFn: func(_ context.Context, channelID string) (*youtube.ChannelDetail, error) {
+			return &youtube.ChannelDetail{
+				Channel: youtube.Channel{
+					ID:              "UCfake_ch_002",
+					Name:            "Another Channel",
+					Handle:          "@anotherfake",
+					SubscriberCount: "4.5K subscribers",
+				},
+				VideoCount:      "17 videos",
+				Subscribed:      false,
+				SubscribedKnown: true,
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Another Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Other Video")
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(150 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(150 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(150 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	waitThenCapture(t, tm, "Not subscribed")
+}
+
 func TestGolden_Video_Post_Detail_Content(t *testing.T) {
 	tm := newTestVideoProgram(t, newPostTestClient())
 	sendKey(tm, "2")

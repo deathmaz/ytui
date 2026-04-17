@@ -63,6 +63,19 @@ var (
 			BorderForeground(DarkGray)
 )
 
+// SubscriptionIndicator returns a styled "subscribed" / "not subscribed" label
+// for use in channel-About, video-detail, and artist views. Returns the empty
+// string when the signed-in subscription state is unknown (e.g. unauthenticated).
+func SubscriptionIndicator(known, subscribed bool) string {
+	if !known {
+		return ""
+	}
+	if subscribed {
+		return Success.Render("✓ Subscribed")
+	}
+	return Dim.Render("○ Not subscribed")
+}
+
 // NewSpinner creates a consistently styled spinner.
 func NewSpinner() spinner.Model {
 	sp := spinner.New()

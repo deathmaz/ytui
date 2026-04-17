@@ -23,10 +23,11 @@ const (
 	tabPlaylists = 1
 	tabPosts     = 2
 	tabStreams   = 3
+	tabAbout     = 4
 )
 
 var (
-	subTabNames = []string{"Videos", "Playlists", "Posts", "Livestreams"}
+	subTabNames = []string{"Videos", "Playlists", "Posts", "Livestreams", "About"}
 	selectKey   = key.NewBinding(key.WithKeys("enter"))
 )
 
@@ -63,6 +64,13 @@ type StreamsLoadedMsg struct {
 	Videos    []youtube.Video
 	NextToken string
 	Append    bool
+	Err       error
+}
+
+// DetailLoadedMsg carries channel header/metadata for the About sub-tab.
+type DetailLoadedMsg struct {
+	ChannelID string
+	Detail    *youtube.ChannelDetail
 	Err       error
 }
 
@@ -106,6 +114,10 @@ type Model struct {
 	streamLoading  bool
 	streamLoaded   bool
 	streamLoadMore bool
+
+	detail         *youtube.ChannelDetail
+	detailLoading  bool
+	detailLoaded   bool
 
 	spinner spinner.Model
 	client  youtube.Client
@@ -154,6 +166,23 @@ func newPlaylistListSetup(videoThumbList *shared.ThumbList, cfg config.Thumbnail
 
 func (m *Model) Channel() *youtube.Channel {
 	return &m.channel
+}
+
+// Detail returns the loaded channel header, or nil if the load failed or is
+// still in flight.
+func (m *Model) Detail() *youtube.ChannelDetail {
+	return m.detail
+}
+
+// SetSubscribed updates the subscription state on the loaded detail so
+// cross-tab propagation can reflect a subscribe/unsubscribe without a refetch.
+// No-op if the detail is not loaded yet.
+func (m *Model) SetSubscribed(subscribed bool) {
+	if m.detail == nil {
+		return
+	}
+	m.detail.Subscribed = subscribed
+	m.detail.SubscribedKnown = true
 }
 
 // RefetchThumbs returns a cmd that re-fetches thumbnails for the active
@@ -215,6 +244,10 @@ func (m *Model) Refresh() tea.Cmd {
 	case tabStreams:
 		m.streamLoaded = false
 		return m.loadStreams()
+	case tabAbout:
+		m.detailLoaded = false
+		m.detail = nil
+		return m.loadDetail()
 	}
 	return nil
 }
@@ -226,7 +259,24 @@ func (m *Model) Load(ch youtube.Channel) tea.Cmd {
 	m.playlistLoaded = false
 	m.postLoaded = false
 	m.streamLoaded = false
-	return m.loadVideos()
+	m.detailLoaded = false
+	m.detail = nil
+	// Fetch the About header in parallel so switching to the tab has no
+	// perceptible delay on a fast connection.
+	return tea.Batch(m.loadVideos(), m.loadDetail())
+}
+
+func (m *Model) loadDetail() tea.Cmd {
+	if m.detailLoading {
+		return nil
+	}
+	m.detailLoading = true
+	client := m.client
+	channelID := m.channel.ID
+	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		d, err := client.GetChannel(context.Background(), channelID)
+		return DetailLoadedMsg{ChannelID: channelID, Detail: d, Err: err}
+	})
 }
 
 func (m *Model) loadVideos() tea.Cmd {
@@ -471,6 +521,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		cmds = append(cmds, shared.AppendItems(&m.postList, newItems, msg.Append))
 		return m, tea.Batch(cmds...)
 
+	case DetailLoadedMsg:
+		if msg.ChannelID != m.channel.ID {
+			return m, nil
+		}
+		m.detailLoading = false
+		m.detailLoaded = true
+		if msg.Err != nil {
+			return m, nil
+		}
+		m.detail = msg.Detail
+		// Seed the base Channel with enriched fields so tab titles and other
+		// views that only have the Channel struct stay consistent.
+		if m.detail.Name != "" {
+			m.channel.Name = m.detail.Name
+		}
+		if m.detail.Handle != "" {
+			m.channel.Handle = m.detail.Handle
+		}
+		return m, nil
+
 	case StreamsLoadedMsg:
 		if msg.ChannelID != m.channel.ID {
 			return m, nil
@@ -573,7 +643,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
-		if m.videoLoading || m.playlistLoading || m.postLoading || m.streamLoading {
+		if m.videoLoading || m.playlistLoading || m.postLoading || m.streamLoading || m.detailLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -622,8 +692,17 @@ func (m Model) renderActiveTab() string {
 		return m.renderPosts()
 	case tabStreams:
 		return m.renderStreams()
+	case tabAbout:
+		return m.renderAbout()
 	}
 	return ""
+}
+
+func (m Model) renderAbout() string {
+	if m.detailLoading && !m.detailLoaded {
+		return m.thumbList.WrapView(nil, m.spinner.View()+" Loading about...")
+	}
+	return m.thumbList.WrapView(nil, aboutView(m.detail, m.width))
 }
 
 func (m Model) renderVideos() string {
