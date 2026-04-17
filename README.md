@@ -7,10 +7,11 @@ A terminal-based YouTube client built with Go and [Bubble Tea](https://github.co
 ### Video Mode
 - **Search** YouTube videos with infinite scroll
 - **Subscription feed** and **channel list** (requires authentication)
-- **Channel details** with Videos, Playlists, Posts, and Livestreams sub-tabs
+- **Channel details** with Videos, Playlists, Posts, Livestreams, and About sub-tabs
+- **Subscribe / unsubscribe** from channels with confirmation picker (requires authentication)
 - **Playlist view** with paginated video list
 - **Community posts** with detail view and comments
-- **Video details** with views, likes, description, and thumbnail
+- **Video details** with views, likes, description, thumbnail, and subscription indicator
 - **Comments** with threaded replies, expand/collapse (videos and posts)
 - **Play** videos with mpv/vlc (background, TUI stays active)
 - **Download** videos with yt-dlp
@@ -21,7 +22,8 @@ A terminal-based YouTube client built with Go and [Bubble Tea](https://github.co
 - **Search** YouTube Music (songs, albums, artists, playlists)
 - **Home feed** with personalized shelves (requires authentication)
 - **Library** with sub-tabs: Playlists, Songs, Albums, Subscriptions (requires authentication)
-- **Artist pages** with sub-tabs for songs, albums, singles, videos
+- **Artist pages** with an About sub-tab (name, subscriber count, subscription state, description) plus shelves for top songs, albums, singles, and videos
+- **Subscribe / unsubscribe** from artists (syncs with YouTube subscriptions; library list updates in place on unsubscribe)
 - **Album/playlist pages** with track listings
 - **Play** songs and albums with mpv
 - **"See all" / Load more** for artist sections and library pagination
@@ -77,6 +79,7 @@ ytui -music -open "https://youtube.com/playlist?list=PLxxx"  # open playlist in 
 | `Enter` | Select / search / open channel or playlist |
 | `i` | Video details |
 | `c` | Open channel for selected video |
+| `S` | Subscribe / unsubscribe (opens picker with current state) |
 | `p` | Play video (default/config quality) |
 | `P` | Play video (pick quality from list) |
 | `d` | Download video |
@@ -105,6 +108,7 @@ ytui -music -open "https://youtube.com/playlist?list=PLxxx"  # open playlist in 
 | `Enter` | Open item (artist/album/playlist) or play song |
 | `p` | Play selected item |
 | `P` | Play full album/playlist (in album tab) |
+| `S` | Subscribe / unsubscribe to the active artist or the song's channel |
 | `L` | Load more (artist sections, library pagination) |
 | `a` | Authenticate (extract browser cookies) |
 | `O` | Open URL dialog (paste YouTube URL) |
@@ -169,6 +173,22 @@ Supported browsers: **Brave**, **Chrome**, **Chromium**, **Firefox**, **Edge**. 
 
 - Press `a` to authenticate manually
 - Set `auth_on_startup = true` in config for automatic authentication
+
+## Subscriptions
+
+Pressing `S` while viewing a channel, video detail, artist, or song opens a
+picker with the action opposite to your current state: `Subscribe` when
+you're not following, `Unsubscribe` when you are. Authentication is
+required; unauthenticated invocations prompt for auth first.
+
+On success, the change propagates in-memory to every open tab that
+references the channel:
+
+- Channel About and video detail indicators flip between `✓ Subscribed`
+  and `○ Not subscribed`.
+- The Subs view and music Library > Subscriptions drop the row on
+  unsubscribe. Subscribe additions become visible after the next refresh
+  (`r`).
 
 ## License
 
