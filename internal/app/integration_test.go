@@ -2889,6 +2889,56 @@ func TestMusicMode_SubscribeFromSongTabPropagates(t *testing.T) {
 	}
 }
 
+// TestMusicMode_SubscribeFromArtistAboutFlipsIndicator asserts that
+// subscribing from the artist About sub-tab flips the indicator in place
+// and that the underlying artistPage state is updated.
+func TestMusicMode_SubscribeFromArtistAboutFlipsIndicator(t *testing.T) {
+	var subscribeCalls atomic.Int32
+	mc := &mockMusicClient{
+		authenticated: true,
+		getArtistFn: func(_ context.Context, _ string) (*youtube.MusicArtistPage, error) {
+			return &youtube.MusicArtistPage{
+				Name:            "Prop Artist",
+				ChannelID:       "UCpropartist",
+				SubscriberCount: "100K subscribers",
+				Subscribed:      false,
+				SubscribedKnown: true,
+			}, nil
+		},
+	}
+	ytc := &mockYTClient{
+		authenticated: true,
+		subscribeFn: func(_ context.Context, channelID string) error {
+			if channelID != "UCpropartist" {
+				t.Errorf("Subscribe called with %q, want UCpropartist", channelID)
+			}
+			subscribeCalls.Add(1)
+			return nil
+		},
+	}
+	parsed := youtube.ParsedURL{Kind: youtube.URLChannel, ID: "MPLAUCpropartist"}
+	m := NewMusic(mc, ytc, testConfig(), ytimage.NewRenderer(), Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	waitForContent(t, tm, "○ Not subscribed")
+
+	sendKey(tm, "S")
+	time.Sleep(150 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "✓ Subscribed")
+
+	mm := quitAndGetMusicModel(t, tm)
+	if subscribeCalls.Load() != 1 {
+		t.Fatalf("Subscribe calls = %d, want 1", subscribeCalls.Load())
+	}
+	tab := mm.tabs.Active()
+	if tab == nil || tab.kind != musicTabArtist {
+		t.Fatalf("active tab = %+v, want artist", tab)
+	}
+	if tab.artistPage == nil || !tab.artistPage.SubscribedKnown || !tab.artistPage.Subscribed {
+		t.Errorf("artistPage state not flipped: %+v", tab.artistPage)
+	}
+}
+
 // TestMusicMode_UnauthenticatedSubscribeBlocked asserts S without auth shows
 // the prompt and issues no Subscribe call.
 func TestMusicMode_UnauthenticatedSubscribeBlocked(t *testing.T) {

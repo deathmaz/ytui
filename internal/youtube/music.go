@@ -50,6 +50,17 @@ func (c *MusicClient) IsAuthenticated() bool {
 	return c.authenticated
 }
 
+// joinRuns concatenates the text field of every run; used for multi-run
+// text nodes (artist headers, post content, …).
+func joinRuns(runs gjson.Result) string {
+	var b strings.Builder
+	runs.ForEach(func(_, run gjson.Result) bool {
+		b.WriteString(run.Get("text").String())
+		return true
+	})
+	return b.String()
+}
+
 // getMusicBrowseTabs resolves the tabs array from either single or two-column browse responses.
 func getMusicBrowseTabs(data gjson.Result) gjson.Result {
 	tabs := data.Get("contents.singleColumnBrowseResultsRenderer.tabs")
@@ -278,6 +289,17 @@ func (c *MusicClient) GetArtist(ctx context.Context, browseID string) (*MusicArt
 	header := data.Get("header.musicImmersiveHeaderRenderer")
 	if header.Exists() {
 		page.Name = header.Get("title.runs.0.text").String()
+		page.Description = joinRuns(header.Get("description.runs"))
+		page.Thumbnails = parseThumbnails(header.Get("thumbnail.musicThumbnailRenderer.thumbnail.thumbnails"))
+		if sb := header.Get("subscriptionButton.subscribeButtonRenderer"); sb.Exists() {
+			page.ChannelID = sb.Get("channelId").String()
+			page.SubscriberCount = joinRuns(sb.Get("subscriberCountText.runs"))
+			if page.SubscriberCount == "" {
+				page.SubscriberCount = sb.Get("subscriberCountText.simpleText").String()
+			}
+			page.Subscribed = sb.Get("subscribed").Bool()
+			page.SubscribedKnown = true
+		}
 	}
 
 	// Content sections

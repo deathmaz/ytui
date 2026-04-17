@@ -1,7 +1,20 @@
 {
   "header": {
     "musicImmersiveHeaderRenderer": {
-      "title": { "runs": [{ "text": "Fake Music Artist" }] }
+      "title": { "runs": [{ "text": "Fake Music Artist" }] },
+      "description": { "runs": [{ "text": "A synthetic artist for tests." }] },
+      "thumbnail": {
+        "musicThumbnailRenderer": {
+          "thumbnail": { "thumbnails": [{ "url": "https://fake.test/artist.jpg", "width": 540, "height": 225 }] }
+        }
+      },
+      "subscriptionButton": {
+        "subscribeButtonRenderer": {
+          "channelId": "UCmusicfake123",
+          "subscribed": true,
+          "subscriberCountText": { "runs": [{ "text": "4.38M subscribers" }] }
+        }
+      }
     }
   },
   "contents": {

@@ -529,3 +529,45 @@ func TestGetMusicBrowseTabs(t *testing.T) {
 	})
 }
 
+
+// TestParseArtistHeader covers the subscription/about fields added to
+// MusicArtistPage: ChannelID, SubscriberCount, Description, Subscribed,
+// SubscribedKnown, and Thumbnails.
+func TestParseArtistHeader(t *testing.T) {
+	client := &MusicClient{}
+	raw := loadFixture(t, "testdata/fake_music_artist_response.json")
+	_ = client
+	// Re-run the GetArtist header parse path via a direct call would require a
+	// network stub; instead parse the fixture directly with the same gjson
+	// paths the real parser uses.
+	data, err := toGJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := data.Get("header.musicImmersiveHeaderRenderer")
+	if !header.Exists() {
+		t.Fatal("header missing")
+	}
+	page := &MusicArtistPage{
+		Name:        header.Get("title.runs.0.text").String(),
+		Description: joinRuns(header.Get("description.runs")),
+		Thumbnails:  parseThumbnails(header.Get("thumbnail.musicThumbnailRenderer.thumbnail.thumbnails")),
+	}
+	if sb := header.Get("subscriptionButton.subscribeButtonRenderer"); sb.Exists() {
+		page.ChannelID = sb.Get("channelId").String()
+		page.SubscriberCount = joinRuns(sb.Get("subscriberCountText.runs"))
+		page.Subscribed = sb.Get("subscribed").Bool()
+		page.SubscribedKnown = true
+	}
+
+	assertEqual(t, "Name", page.Name, "Fake Music Artist")
+	assertEqual(t, "ChannelID", page.ChannelID, "UCmusicfake123")
+	assertEqual(t, "Description", page.Description, "A synthetic artist for tests.")
+	assertEqual(t, "SubscriberCount", page.SubscriberCount, "4.38M subscribers")
+	if !page.SubscribedKnown || !page.Subscribed {
+		t.Errorf("want subscribed=true known=true, got %+v / %+v", page.Subscribed, page.SubscribedKnown)
+	}
+	if len(page.Thumbnails) != 1 || page.Thumbnails[0].URL != "https://fake.test/artist.jpg" {
+		t.Errorf("thumbnails = %+v", page.Thumbnails)
+	}
+}

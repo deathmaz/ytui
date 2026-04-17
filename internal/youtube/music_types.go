@@ -38,8 +38,18 @@ type MusicSearchResult struct {
 
 // MusicArtistPage holds data for an artist page.
 type MusicArtistPage struct {
-	Name     string
-	Shelves  []MusicShelf // top songs, albums, singles, videos, etc.
+	Name            string
+	Shelves         []MusicShelf // top songs, albums, singles, videos, etc.
+	ChannelID       string       // underlying UC channel ID, used by Subscribe
+	SubscriberCount string
+	Description     string
+	Thumbnails      []Thumbnail
+
+	// Subscribed reflects the signed-in user's state. SubscribedKnown
+	// distinguishes "not subscribed" from an unauthenticated response where
+	// the field is absent entirely.
+	Subscribed      bool
+	SubscribedKnown bool
 }
 
 // MusicAlbumPage holds data for an album page.

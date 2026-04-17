@@ -907,17 +907,11 @@ func (c *InnerTubeClient) GetChannelPosts(ctx context.Context, channelID string,
 }
 
 func parseBackstagePost(bpr gjson.Result) Post {
-	var b strings.Builder
-	bpr.Get("contentText.runs").ForEach(func(_, run gjson.Result) bool {
-		b.WriteString(run.Get("text").String())
-		return true
-	})
-
 	p := Post{
 		ID:          bpr.Get("postId").String(),
 		AuthorName:  bpr.Get("authorText.runs.0.text").String(),
 		AuthorID:    bpr.Get("authorEndpoint.browseEndpoint.browseId").String(),
-		Content:     b.String(),
+		Content:     joinRuns(bpr.Get("contentText.runs")),
 		LikeCount:   bpr.Get("voteCount.simpleText").String(),
 		PublishedAt: bpr.Get("publishedTimeText.runs.0.text").String(),
 	}

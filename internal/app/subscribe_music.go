@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,10 +27,26 @@ func (m *MusicModel) resolveSubscribeTarget() *subscribeTarget {
 					}
 				}
 			case musicTabArtist:
-				if tab.browseID == "" {
+				// Subscribe requires a real UC channel ID. browseID on a
+				// music artist is commonly prefixed (MPLA...) and will be
+				// rejected by the endpoint, so we only use it as a last
+				// resort when its shape matches a UC ID.
+				t := &subscribeTarget{name: tab.title}
+				if p := tab.artistPage; p != nil {
+					t.channelID = p.ChannelID
+					if p.Name != "" {
+						t.name = p.Name
+					}
+					t.known = p.SubscribedKnown
+					t.subscribed = p.Subscribed
+				}
+				if t.channelID == "" && strings.HasPrefix(tab.browseID, "UC") {
+					t.channelID = tab.browseID
+				}
+				if t.channelID == "" {
 					return nil
 				}
-				return &subscribeTarget{channelID: tab.browseID, name: tab.title}
+				return t
 			}
 		}
 	}
@@ -65,18 +82,27 @@ func (m *MusicModel) handleSubscribeResult(msg subscribeResultMsg) tea.Cmd {
 	return m.setStatus(text, dur)
 }
 
-// propagateSubscription fans a subscription state change to song tabs whose
-// underlying video shares the channel. Artist tabs have no subscription
-// indicator yet (about-style artist header is a separate step), so they are
-// left alone — state is refetched on the next load.
+// propagateSubscription fans a subscription state change out to every open
+// music tab that references the channel: song tabs via the shared
+// detail.Model, artist tabs via the About header. Artist tabs match on the
+// parsed ChannelID (falling back to browseID when it equals the UC ID).
 func (m *MusicModel) propagateSubscription(channelID string, subscribed bool) {
 	for i := range m.tabs.All() {
 		tab := m.tabs.At(i)
-		if tab.kind != musicTabSong {
-			continue
-		}
-		if v := tab.songDetail.Video(); v != nil && v.ChannelID == channelID {
-			tab.songDetail.SetChannelSubscribed(subscribed)
+		switch tab.kind {
+		case musicTabSong:
+			if v := tab.songDetail.Video(); v != nil && v.ChannelID == channelID {
+				tab.songDetail.SetChannelSubscribed(subscribed)
+			}
+		case musicTabArtist:
+			p := tab.artistPage
+			if p == nil || p.ChannelID == "" {
+				continue
+			}
+			if p.ChannelID == channelID {
+				p.Subscribed = subscribed
+				p.SubscribedKnown = true
+			}
 		}
 	}
 }

@@ -48,6 +48,11 @@ type subTab struct {
 	title        string
 	list         list.Model
 	continuation string // for library pagination
+	// isAbout marks the synthetic About entry on artist pages. Rendered by
+	// artistAboutView instead of the list; load-more and list navigation skip
+	// it. Prefer this over string-matching the title in case an upstream
+	// shelf is ever named "About".
+	isAbout bool
 }
 
 type musicTab struct {
@@ -1083,8 +1088,16 @@ func (m *MusicModel) openTab(kind musicTabKind, title, browseID string) tea.Cmd 
 	return nil
 }
 
+const artistAboutTabTitle = "About"
+
 func (m *MusicModel) buildArtistSubTabs(artist *youtube.MusicArtistPage) []subTab {
-	return shelvesToSubTabs(artist.Shelves, m.musicListDelegate())
+	shelves := shelvesToSubTabs(artist.Shelves, m.musicListDelegate())
+	// Prepend About as the landing sub-tab so the artist's name, subscriber
+	// count, subscription state, and description are visible without extra
+	// navigation. The About entry has no list; renderArtistPage special-cases
+	// it.
+	about := []subTab{{title: artistAboutTabTitle, list: shared.NewList(m.musicListDelegate()), isAbout: true}}
+	return append(about, shelves...)
 }
 
 func (m *MusicModel) buildAlbumList(album *youtube.MusicAlbumPage) list.Model {
@@ -1254,12 +1267,36 @@ func renderMusicSubTabBar(subs []subTab, activeIdx int) string {
 	return shared.RenderSubTabBar(names, activeIdx)
 }
 
+// artistAboutView renders the About sub-tab body for a music artist page.
+func artistAboutView(p *youtube.MusicArtistPage, width int) string {
+	if p == nil {
+		return styles.Dim.Render("(no artist data)")
+	}
+	var meta []string
+	if p.SubscriberCount != "" {
+		meta = append(meta, p.SubscriberCount)
+	}
+	return shared.AboutView(shared.AboutData{
+		Name:            p.Name,
+		MetaParts:       meta,
+		Description:     p.Description,
+		Subscribed:      p.Subscribed,
+		SubscribedKnown: p.SubscribedKnown,
+	}, width)
+}
+
 func (m *MusicModel) renderArtistPage(tab *musicTab) string {
 	if len(tab.artistSubs) == 0 {
 		return styles.Dim.Render("No content")
 	}
 
 	subBar := renderMusicSubTabBar(tab.artistSubs, tab.activeSubTab)
+
+	if tab.activeSubTab < len(tab.artistSubs) && tab.artistSubs[tab.activeSubTab].isAbout {
+		body := artistAboutView(tab.artistPage, m.width)
+		view := lipgloss.JoinVertical(lipgloss.Left, subBar, body)
+		return m.thumbList.WrapView(nil, view)
+	}
 
 	// Check if more items are available
 	var hint string

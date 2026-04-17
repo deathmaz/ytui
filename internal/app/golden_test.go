@@ -556,11 +556,47 @@ func TestGolden_Music_ArtistPage(t *testing.T) {
 			}, nil
 		},
 	}
-	// Search → results → Enter to open artist
+	// Search → results → Enter to open artist → Tab past About to Songs.
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
 	waitForContent(t, tm, "Test Artist")
 	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "About")
+	sendSpecialKey(tm, tea.KeyTab)
 	waitThenCapture(t, tm, "Hit Song")
+}
+
+func TestGolden_Music_ArtistPage_About(t *testing.T) {
+	mc := &mockMusicClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, _, _ string) (*youtube.MusicSearchResult, error) {
+			return &youtube.MusicSearchResult{
+				Shelves: []youtube.MusicShelf{
+					{Title: "Artists", Items: []youtube.MusicItem{
+						{Title: "Test Artist", Subtitle: "Artist", Type: youtube.MusicArtist, BrowseID: "artist1"},
+					}},
+				},
+			}, nil
+		},
+		getArtistFn: func(_ context.Context, _ string) (*youtube.MusicArtistPage, error) {
+			return &youtube.MusicArtistPage{
+				Name:            "Test Artist",
+				ChannelID:       "UCartist1",
+				SubscriberCount: "1.2M subscribers",
+				Description:     "Synthetic artist for golden tests.",
+				Subscribed:      true,
+				SubscribedKnown: true,
+				Shelves: []youtube.MusicShelf{
+					{Title: "Songs", Items: []youtube.MusicItem{
+						{Title: "Hit Song", Subtitle: "Test Artist", Type: youtube.MusicSong, VideoID: "s1"},
+					}},
+				},
+			}, nil
+		},
+	}
+	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
+	waitForContent(t, tm, "Test Artist")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitThenCapture(t, tm, "✓ Subscribed")
 }
 
 func TestGolden_Music_AlbumPage(t *testing.T) {
@@ -677,11 +713,13 @@ func TestGolden_Music_ArtistPage_AlbumsSubTab(t *testing.T) {
 			}, nil
 		},
 	}
-	// Search → results → Enter to open artist → Tab to switch to Albums shelf
+	// Search → Enter to open artist → Tab past About (0) and Songs (1) to Albums (2).
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
 	waitForContent(t, tm, "Test Artist")
 	sendSpecialKey(tm, tea.KeyEnter)
 	time.Sleep(400 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyTab)
+	time.Sleep(100 * time.Millisecond)
 	sendSpecialKey(tm, tea.KeyTab)
 	time.Sleep(200 * time.Millisecond)
 	captureGolden(t, tm)
