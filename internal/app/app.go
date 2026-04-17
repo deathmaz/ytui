@@ -193,12 +193,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeViews()
 
 	case tea.KeyMsg:
-		// Modal dialogs take priority
-		if m.picker.IsActive() {
-			var cmd tea.Cmd
-			m.picker, cmd = m.picker.Update(msg)
-			cmds = append(cmds, cmd)
-			return m, tea.Batch(cmds...)
+		if cmd, handled := handlePickerKey(msg, &m.picker); handled {
+			return m, cmd
 		}
 		if cmd, handled := handleURLInput(msg, &m.urlInput); handled {
 			return m, cmd

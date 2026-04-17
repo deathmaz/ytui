@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/deathmaz/ytui/internal/ui/picker"
+	"github.com/deathmaz/ytui/internal/youtube"
 )
 
 // subscribeResultMsg is dispatched after a Subscribe/Unsubscribe call completes.
@@ -115,17 +116,19 @@ func subscribeOptions(t *subscribeTarget) []picker.Option {
 }
 
 // runSubscription drives the actual Subscribe/Unsubscribe call.
-func (m *Model) runSubscription(channelID, channelName string, subscribe bool) tea.Cmd {
+// runSubscriptionCmd drives the Subscribe/Unsubscribe HTTP call and wraps it
+// in a tea.Batch alongside a pending-status message. Shared by both video
+// and music modes.
+func runSubscriptionCmd(client youtube.Client, setStatus func(string, time.Duration) tea.Cmd, channelID, channelName string, subscribe bool) tea.Cmd {
 	if channelName == "" {
 		channelName = channelID
 	}
-	client := m.ytClient
 	pending := "Subscribing to " + channelName + "..."
 	if !subscribe {
 		pending = "Unsubscribing from " + channelName + "..."
 	}
 	return tea.Batch(
-		m.setStatus(pending, 10*time.Second),
+		setStatus(pending, 10*time.Second),
 		func() tea.Msg {
 			ctx := context.Background()
 			var err error
@@ -144,23 +147,36 @@ func (m *Model) runSubscription(channelID, channelName string, subscribe bool) t
 	)
 }
 
-// handleSubscribeResult applies a successful subscribe/unsubscribe to every
-// open tab that references the channel and to the subs list, then shows a
-// status message. Errors surface as a status message only.
-func (m *Model) handleSubscribeResult(msg subscribeResultMsg) tea.Cmd {
+// subscribeResultStatus maps a subscribeResultMsg to a user-facing status
+// line. The error branch is grammar-matched to the direction of the action.
+func subscribeResultStatus(msg subscribeResultMsg) (string, time.Duration) {
 	if msg.err != nil {
 		verb := "Subscribe"
 		if !msg.subscribe {
 			verb = "Unsubscribe"
 		}
-		return m.setStatus(fmt.Sprintf("%s failed: %v", verb, msg.err), 5*time.Second)
+		return fmt.Sprintf("%s failed: %v", verb, msg.err), 5 * time.Second
 	}
-	m.propagateSubscription(msg.channelID, msg.subscribe)
 	verb := "Subscribed to "
 	if !msg.subscribe {
 		verb = "Unsubscribed from "
 	}
-	return m.setStatus(verb+msg.channelName, 3*time.Second)
+	return verb + msg.channelName, 3 * time.Second
+}
+
+func (m *Model) runSubscription(channelID, channelName string, subscribe bool) tea.Cmd {
+	return runSubscriptionCmd(m.ytClient, m.setStatus, channelID, channelName, subscribe)
+}
+
+// handleSubscribeResult applies a successful subscribe/unsubscribe to every
+// open tab that references the channel and to the subs list, then shows a
+// status message. Errors surface as a status message only.
+func (m *Model) handleSubscribeResult(msg subscribeResultMsg) tea.Cmd {
+	if msg.err == nil {
+		m.propagateSubscription(msg.channelID, msg.subscribe)
+	}
+	text, dur := subscribeResultStatus(msg)
+	return m.setStatus(text, dur)
 }
 
 // propagateSubscription fans a subscription state change out to every open

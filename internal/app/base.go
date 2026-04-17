@@ -13,6 +13,7 @@ import (
 	"github.com/deathmaz/ytui/internal/config"
 	"github.com/deathmaz/ytui/internal/state"
 	"github.com/deathmaz/ytui/internal/ui/search"
+	"github.com/deathmaz/ytui/internal/ui/picker"
 	"github.com/deathmaz/ytui/internal/ui/urlinput"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -256,6 +257,21 @@ func handleSearchFocused(msg tea.Msg, s *search.Model, searchActive bool, keys K
 	}
 	updated, cmd := s.Update(msg)
 	*s = updated
+	return cmd, true
+}
+
+// handlePickerKey forwards a KeyMsg to the picker when it's active. Both
+// video and music modes call this first in their Update to let the modal
+// swallow keys before mode-specific routing runs.
+func handlePickerKey(msg tea.Msg, p *picker.Model) (tea.Cmd, bool) {
+	if !p.IsActive() {
+		return nil, false
+	}
+	if _, isKey := msg.(tea.KeyMsg); !isKey {
+		return nil, false
+	}
+	updated, cmd := p.Update(msg)
+	*p = updated
 	return cmd, true
 }
 

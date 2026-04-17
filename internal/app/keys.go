@@ -94,7 +94,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // MusicShortHelp returns the compact help bindings for music mode.
 func (k KeyMap) MusicShortHelp() []key.Binding {
-	return []key.Binding{k.Search, k.Play, k.PlayAlbum, k.Enter, k.NextTab, k.LoadMore, k.Auth, k.OpenURL, k.Back, k.Quit}
+	return []key.Binding{k.Search, k.Play, k.PlayAlbum, k.Enter, k.Subscribe, k.NextTab, k.LoadMore, k.Auth, k.OpenURL, k.Back, k.Quit}
 }
 
 // MusicFullHelp returns the extended help bindings for music mode.

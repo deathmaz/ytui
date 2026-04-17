@@ -2801,3 +2801,119 @@ func TestVideoMode_UnsubscribeFromVideoDetailFlipsIndicator(t *testing.T) {
 		t.Errorf("video state not flipped: %+v", v)
 	}
 }
+
+// === Music mode subscribe (step 8) ===
+
+// TestMusicMode_SubscribeFromArtistTab opens an artist tab and asserts the
+// S picker wires through to Subscribe with the artist's browseID.
+func TestMusicMode_SubscribeFromArtistTab(t *testing.T) {
+	var subscribeCalls atomic.Int32
+	mc := &mockMusicClient{
+		authenticated: true,
+		getArtistFn: func(_ context.Context, browseID string) (*youtube.MusicArtistPage, error) {
+			return &youtube.MusicArtistPage{Name: "Fake Artist"}, nil
+		},
+	}
+	ytc := &mockYTClient{
+		authenticated: true,
+		subscribeFn: func(_ context.Context, channelID string) error {
+			if channelID != "UCartist" {
+				t.Errorf("Subscribe called with %q, want UCartist", channelID)
+			}
+			subscribeCalls.Add(1)
+			return nil
+		},
+	}
+	parsed := youtube.ParsedURL{Kind: youtube.URLChannel, ID: "UCartist"}
+	m := NewMusic(mc, ytc, testConfig(), nil, Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	waitForContent(t, tm, "Fake Artist")
+
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Subscription")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Subscribed to Fake Artist")
+
+	quitAndGetMusicModel(t, tm)
+	if subscribeCalls.Load() != 1 {
+		t.Errorf("Subscribe calls = %d, want 1", subscribeCalls.Load())
+	}
+}
+
+
+// TestMusicMode_SubscribeFromSongTabPropagates opens a song detail in music
+// mode, presses S, and asserts the Subscribe call fired and the indicator
+// flipped on the song's detail model.
+func TestMusicMode_SubscribeFromSongTabPropagates(t *testing.T) {
+	var subscribeCalls atomic.Int32
+	mc := &mockMusicClient{authenticated: true}
+	ytc := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{
+				ID: id, Title: "Fake Song", ChannelName: "Fake Artist",
+				ChannelID: "UCartist", ChannelSubscribed: false, ChannelSubscribedKnown: true,
+			}, nil
+		},
+		subscribeFn: func(_ context.Context, channelID string) error {
+			if channelID != "UCartist" {
+				t.Errorf("Subscribe called with %q, want UCartist", channelID)
+			}
+			subscribeCalls.Add(1)
+			return nil
+		},
+	}
+	parsed := youtube.ParsedURL{Kind: youtube.URLVideo, ID: "songid"}
+	m := NewMusic(mc, ytc, testConfig(), ytimage.NewRenderer(), Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	teatest.WaitFor(t, tm.Output(), func(bts []byte) bool {
+		return strings.Contains(string(bts), "Fake Song")
+	}, teatest.WithDuration(5*time.Second))
+
+	sendKey(tm, "S")
+	time.Sleep(150 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEnter)
+	time.Sleep(300 * time.Millisecond)
+
+	mm := quitAndGetMusicModel(t, tm)
+	if subscribeCalls.Load() != 1 {
+		t.Fatalf("Subscribe calls = %d, want 1", subscribeCalls.Load())
+	}
+	tab := mm.tabs.Active()
+	if tab == nil || tab.kind != musicTabSong {
+		t.Fatalf("active tab = %+v, want song", tab)
+	}
+	v := tab.songDetail.Video()
+	if v == nil || !v.ChannelSubscribedKnown || !v.ChannelSubscribed {
+		t.Errorf("song state not flipped: %+v", v)
+	}
+}
+
+// TestMusicMode_UnauthenticatedSubscribeBlocked asserts S without auth shows
+// the prompt and issues no Subscribe call.
+func TestMusicMode_UnauthenticatedSubscribeBlocked(t *testing.T) {
+	var subscribeCalls atomic.Int32
+	mc := &mockMusicClient{authenticated: false}
+	ytc := &mockYTClient{
+		authenticated: false,
+		subscribeFn: func(_ context.Context, _ string) error {
+			subscribeCalls.Add(1)
+			return nil
+		},
+	}
+	parsed := youtube.ParsedURL{Kind: youtube.URLChannel, ID: "UCnoauth"}
+	m := NewMusic(mc, ytc, testConfig(), nil, Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	time.Sleep(200 * time.Millisecond)
+
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Authenticate first")
+
+	mm := quitAndGetMusicModel(t, tm)
+	if subscribeCalls.Load() != 0 {
+		t.Errorf("Subscribe calls = %d, want 0", subscribeCalls.Load())
+	}
+	if mm.picker.IsActive() {
+		t.Error("picker should not be active")
+	}
+}

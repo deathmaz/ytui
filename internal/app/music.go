@@ -17,6 +17,7 @@ import (
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/state"
 	"github.com/deathmaz/ytui/internal/ui/detail"
+	"github.com/deathmaz/ytui/internal/ui/picker"
 	"github.com/deathmaz/ytui/internal/ui/search"
 	"github.com/deathmaz/ytui/internal/ui/urlinput"
 	"github.com/deathmaz/ytui/internal/ui/shared"
@@ -142,6 +143,9 @@ type MusicModel struct {
 	activeFixed musicFixedView
 	search      search.Model
 	spinner     spinner.Model
+	picker      picker.Model
+
+	pendingSubscribe *subscribeTarget
 
 	// Home
 	homeSubs   []subTab
@@ -197,6 +201,7 @@ func NewMusic(client youtube.MusicAPI, ytClient youtube.Client, cfg *config.Conf
 		thumbList:   thumbList,
 		search:      s,
 		urlInput:    urlinput.New(),
+		picker:      picker.New(),
 		spinner:     styles.NewSpinner(),
 		tabs:           NewTabSet[musicTab](maxMusicTabs, func(t *musicTab) string { return t.browseID }),
 		pendingState: pendingState{
@@ -240,6 +245,10 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeViews()
 	}
 
+	if cmd, handled := handlePickerKey(msg, &m.picker); handled {
+		return m, cmd
+	}
+
 	if cmd, handled := handleURLInput(msg, &m.urlInput); handled {
 		return m, cmd
 	}
@@ -251,6 +260,13 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Delegate to song detail tab
 	if tab := m.activeTab(); tab != nil && tab.kind == musicTabSong {
 		handled := true
+		// Let subscribe-related messages fall through to the main switch;
+		// otherwise forwarding them into detail.Update swallows them and the
+		// picker selection never drives runSubscription.
+		switch msg.(type) {
+		case picker.SelectedMsg, picker.CancelledMsg, subscribeResultMsg:
+			handled = false
+		}
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
 			if action, ok := HandleGlobalKey(keyMsg, m.keys); ok {
 				switch action {
@@ -267,6 +283,11 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.loadRestoredTab()
 				case key.Matches(keyMsg, m.keys.Play):
 					return m, playVideoCmd(youtube.VideoURL(tab.browseID), "", m.cfg.Player.EffectiveCommand(true), m.cfg.Player.EffectiveArgs(true))
+				case key.Matches(keyMsg, m.keys.Subscribe):
+					// Duplicated in the outer switch below; the song-tab delegate
+					// block returns early for keypresses, so the outer S binding
+					// is unreachable once a song tab is active.
+					return m, m.openSubscribePicker()
 				default:
 					// Let tab number keys fall through to main handler
 					if k := keyMsg.String(); len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
@@ -321,6 +342,8 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.playAlbum()
 		case key.Matches(msg, m.keys.Enter):
 			return m, m.openSelected()
+		case key.Matches(msg, m.keys.Subscribe):
+			return m, m.openSubscribePicker()
 		}
 
 		// Tab keys: 1=Home, 2=Library, 3=Search, 4+=dynamic tabs
@@ -574,6 +597,27 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case picker.SelectedMsg:
+		switch msg.Target {
+		case picker.TargetSubscribe:
+			if t := m.pendingSubscribe; t != nil {
+				m.pendingSubscribe = nil
+				return m, m.runSubscription(t.channelID, t.name, msg.Key == subKeySubscribe)
+			}
+		default:
+			return m, m.setStatus(fmt.Sprintf("unknown picker target: %d", msg.Target), 3*time.Second)
+		}
+		return m, nil
+
+	case picker.CancelledMsg:
+		if msg.Target == picker.TargetSubscribe {
+			m.pendingSubscribe = nil
+		}
+		return m, nil
+
+	case subscribeResultMsg:
+		return m, m.handleSubscribeResult(msg)
+
 	case musicPlayReadyMsg:
 		if msg.err != nil {
 			return m, m.setStatus("Play error: "+msg.err.Error(), 5*time.Second)
@@ -671,7 +715,7 @@ func (m *MusicModel) View() string {
 
 	view := RenderShell(
 		m.width,
-		[]ModalView{&m.urlInput},
+		[]ModalView{&m.urlInput, &m.picker},
 		m.renderTabs,
 		m.renderContent,
 		statusLine,
