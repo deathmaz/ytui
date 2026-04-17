@@ -94,7 +94,8 @@ type Model struct {
 	cfg           *config.Config
 	tabs TabSet[dynamicTab]
 
-	pendingVideoURL string
+	pendingVideoURL  string
+	pendingSubscribe *subscribeTarget
 	pendingState
 	startupWarning  string
 	status          StatusManager
@@ -262,6 +263,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.refresh()
 			case key.Matches(msg, m.keys.Channel):
 				return m, m.openChannelForSelected()
+			case key.Matches(msg, m.keys.Subscribe):
+				return m, m.openSubscribePicker()
 			}
 
 			// Dynamic tab number keys (4-9)
@@ -313,6 +316,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pendingVideoURL = ""
 				return m, playVideoCmd(url, msg.Key, m.cfg.Player.Video.Command, m.cfg.Player.Video.Args)
 			}
+		case picker.TargetSubscribe:
+			if t := m.pendingSubscribe; t != nil {
+				m.pendingSubscribe = nil
+				return m, m.runSubscription(t.channelID, t.name, msg.Key == subKeySubscribe)
+			}
 		default:
 			return m, m.setStatus(fmt.Sprintf("unknown picker target: %d", msg.Target), 3*time.Second)
 		}
@@ -322,8 +330,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Target {
 		case picker.TargetQuality:
 			m.pendingVideoURL = ""
+		case picker.TargetSubscribe:
+			m.pendingSubscribe = nil
 		}
 		return m, nil
+
+	case subscribeResultMsg:
+		return m, m.handleSubscribeResult(msg)
 
 	case playerErrorMsg:
 		return m, m.setStatus("Player error: "+msg.err.Error(), 5*time.Second)

@@ -119,6 +119,21 @@ func (m Model) Video() *youtube.Video {
 	return m.video
 }
 
+// SetChannelSubscribed updates the subscription state on the loaded video so
+// cross-tab propagation can reflect a subscribe/unsubscribe without refetch.
+// Triggers a re-render of the Info tab if active. No-op if the video is not
+// loaded yet.
+func (m *Model) SetChannelSubscribed(subscribed bool) {
+	if m.video == nil {
+		return
+	}
+	m.video.ChannelSubscribed = subscribed
+	m.video.ChannelSubscribedKnown = true
+	if m.activeTab == tabInfo {
+		m.infoViewport.SetContent(m.renderInfo())
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	var cmds []tea.Cmd
 

@@ -108,6 +108,44 @@ func (m *Model) SetSize(w, h int) {
 	m.list.SetSize(w, h)
 }
 
+// Channels returns a snapshot of the current channel list.
+func (m *Model) Channels() []youtube.Channel {
+	raw := m.list.Items()
+	out := make([]youtube.Channel, 0, len(raw))
+	for _, it := range raw {
+		if ci, ok := it.(channelItem); ok {
+			out = append(out, ci.channel)
+		}
+	}
+	return out
+}
+
+// SelectedChannel returns the currently highlighted channel, if any.
+func (m *Model) SelectedChannel() *youtube.Channel {
+	ci, ok := m.list.SelectedItem().(channelItem)
+	if !ok {
+		return nil
+	}
+	c := ci.channel
+	return &c
+}
+
+// RemoveChannel drops any item matching channelID from the list. Used to
+// reflect an unsubscribe without refetching.
+func (m *Model) RemoveChannel(channelID string) {
+	existing := m.list.Items()
+	filtered := existing[:0]
+	for _, it := range existing {
+		if ci, ok := it.(channelItem); ok && ci.channel.ID == channelID {
+			continue
+		}
+		filtered = append(filtered, it)
+	}
+	if len(filtered) != len(existing) {
+		m.list.SetItems(filtered)
+	}
+}
+
 // Load fetches subscriptions. Only fetches once unless forced.
 func (m *Model) Load(force bool) tea.Cmd {
 	if m.loaded && !force {

@@ -1205,6 +1205,72 @@ func TestGolden_Video_Channel_About_NotSubscribed(t *testing.T) {
 	waitThenCapture(t, tm, "Not subscribed")
 }
 
+func TestGolden_Video_Channel_SubscribePicker_NotSubscribed(t *testing.T) {
+	client := subscribeTestClient("UCfake_ch_001", "Fake Channel", "@fakechannel", false)
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendKey(tm, "S")
+	waitThenCapture(t, tm, "Subscribe")
+}
+
+func TestGolden_Video_Channel_SubscribePicker_Subscribed(t *testing.T) {
+	client := subscribeTestClient("UCfake_ch_001", "Fake Channel", "@fakechannel", true)
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendKey(tm, "S")
+	waitThenCapture(t, tm, "Unsubscribe")
+}
+
+func TestGolden_Video_Channel_SubscribeSuccess(t *testing.T) {
+	client := subscribeTestClient("UCfake_ch_001", "Fake Channel", "@fakechannel", false)
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Fake Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "A Video")
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Subscription")
+	// First option is Subscribe; Enter confirms.
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitThenCapture(t, tm, "Subscribed to Fake Channel")
+}
+
+// subscribeTestClient builds a mockYTClient whose channel surface returns a
+// single stub video and the given channel detail, and whose Subscribe/
+// Unsubscribe calls succeed without a real HTTP round-trip.
+func subscribeTestClient(channelID, name, handle string, subscribed bool) *mockYTClient {
+	return &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, _ string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{{ID: channelID, Name: name}},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cv1", Title: "A Video", ChannelName: name}},
+			}, nil
+		},
+		getChannelFn: func(_ context.Context, _ string) (*youtube.ChannelDetail, error) {
+			return &youtube.ChannelDetail{
+				Channel: youtube.Channel{
+					ID: channelID, Name: name, Handle: handle,
+					SubscriberCount: "1.2M subscribers",
+				},
+				VideoCount:      "123 videos",
+				Subscribed:      subscribed,
+				SubscribedKnown: true,
+			}, nil
+		},
+	}
+}
+
 func TestGolden_Video_Post_Detail_Content(t *testing.T) {
 	tm := newTestVideoProgram(t, newPostTestClient())
 	sendKey(tm, "2")

@@ -2556,3 +2556,174 @@ func TestMusicMode_OpenURLWithRestoredTabsFocusesAndLoads(t *testing.T) {
 		t.Error("expected GetVideo to be called for -open URL in music mode")
 	}
 }
+
+// === Subscribe / Unsubscribe (step 6) ===
+
+// TestVideoMode_SubscribePropagatesToOpenTabs asserts that a successful
+// Subscribe flips state in every open tab referencing the channel — not just
+// the one that initiated the action.
+func TestVideoMode_SubscribePropagatesToOpenTabs(t *testing.T) {
+	var subscribeCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, _ string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{{ID: "UCprop", Name: "Prop Channel"}},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "prop_v1", Title: "Prop Video", ChannelName: "Prop Channel", ChannelID: "UCprop"}},
+			}, nil
+		},
+		getChannelFn: func(_ context.Context, _ string) (*youtube.ChannelDetail, error) {
+			return &youtube.ChannelDetail{
+				Channel: youtube.Channel{
+					ID: "UCprop", Name: "Prop Channel", Handle: "@prop",
+					SubscriberCount: "1K subscribers",
+				},
+				VideoCount:      "10 videos",
+				Subscribed:      false,
+				SubscribedKnown: true,
+			}, nil
+		},
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{
+				ID: id, Title: "Prop Video", ChannelName: "Prop Channel", ChannelID: "UCprop",
+				ChannelSubscribed: false, ChannelSubscribedKnown: true,
+			}, nil
+		},
+		subscribeFn: func(_ context.Context, _ string) error {
+			subscribeCalls.Add(1)
+			return nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+
+	// Open channel tab via subs view.
+	sendKey(tm, "2")
+	waitForContent(t, tm, "Prop Channel")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Prop Video")
+
+	// Open video detail tab for a video from the same channel.
+	sendKey(tm, "i")
+	waitForContent(t, tm, "Prop Video")
+
+	// Switch back to the channel tab (tab 4 is channel, tab 5 is video in open order).
+	sendKey(tm, "4")
+	waitForContent(t, tm, "Prop Video")
+
+	// Fire subscribe from the channel tab.
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Subscription")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Subscribed to Prop Channel")
+
+	m := quitAndGetVideoModel(t, tm)
+	if subscribeCalls.Load() != 1 {
+		t.Fatalf("Subscribe calls = %d, want 1", subscribeCalls.Load())
+	}
+	for i := range m.tabs.All() {
+		tab := m.tabs.At(i)
+		switch tab.kind {
+		case tabChannel:
+			d := tab.channel.Detail()
+			if d == nil || !d.SubscribedKnown || !d.Subscribed {
+				t.Errorf("channel tab detail not flipped: %+v", d)
+			}
+		case tabVideo:
+			v := tab.detail.Video()
+			if v == nil || !v.ChannelSubscribedKnown || !v.ChannelSubscribed {
+				t.Errorf("video tab channelSubscribed not flipped: %+v", v)
+			}
+		}
+	}
+}
+
+// TestVideoMode_UnsubscribeRemovesFromSubsList asserts that an unsubscribe
+// drops the channel row from an already-loaded subs view.
+func TestVideoMode_UnsubscribeRemovesFromSubsList(t *testing.T) {
+	var unsubscribeCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: true,
+		getSubsFn: func(_ context.Context, _ string) (*youtube.Page[youtube.Channel], error) {
+			return &youtube.Page[youtube.Channel]{
+				Items: []youtube.Channel{
+					{ID: "UCone", Name: "One Channel"},
+					{ID: "UCtwo", Name: "Two Channel"},
+				},
+			}, nil
+		},
+		getChannelVideosFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "v1", Title: "Vid"}},
+			}, nil
+		},
+		getChannelFn: func(_ context.Context, id string) (*youtube.ChannelDetail, error) {
+			return &youtube.ChannelDetail{
+				Channel:         youtube.Channel{ID: id, Name: "One Channel"},
+				Subscribed:      true,
+				SubscribedKnown: true,
+			}, nil
+		},
+		unsubscribeFn: func(_ context.Context, _ string) error {
+			unsubscribeCalls.Add(1)
+			return nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+
+	sendKey(tm, "2")
+	waitForContent(t, tm, "One Channel")
+	// Open first channel tab.
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Vid")
+
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Subscription")
+	// Already subscribed → picker shows only Unsubscribe.
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Unsubscribed from One Channel")
+
+	m := quitAndGetVideoModel(t, tm)
+	if unsubscribeCalls.Load() != 1 {
+		t.Errorf("Unsubscribe calls = %d, want 1", unsubscribeCalls.Load())
+	}
+	// Subs list should now contain only "Two Channel".
+	chans := m.subs.Channels()
+	if len(chans) != 1 {
+		t.Fatalf("subs list size = %d, want 1 (row for UCone dropped)", len(chans))
+	}
+}
+
+// TestVideoMode_UnauthenticatedSubscribeBlocked asserts that pressing S
+// without auth shows the prompt status and never issues a Subscribe call.
+func TestVideoMode_UnauthenticatedSubscribeBlocked(t *testing.T) {
+	var subscribeCalls atomic.Int32
+	client := &mockYTClient{
+		authenticated: false,
+		searchFn: func(_ context.Context, _, _ string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "v", Title: "A Video", ChannelID: "UCx", ChannelName: "X"}},
+			}, nil
+		},
+		subscribeFn: func(_ context.Context, _ string) error {
+			subscribeCalls.Add(1)
+			return nil
+		},
+	}
+	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
+	waitForContent(t, tm, "A Video")
+
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Authenticate first")
+
+	m := quitAndGetVideoModel(t, tm)
+	if subscribeCalls.Load() != 0 {
+		t.Errorf("Subscribe calls = %d, want 0", subscribeCalls.Load())
+	}
+	if m.picker.IsActive() {
+		t.Error("picker should not be active after unauthenticated subscribe attempt")
+	}
+}
