@@ -51,6 +51,8 @@ type clearStatusMsg struct{ seq int }
 
 const maxDynamicTabs = 6
 
+const qualityPickerTitle = "Select Quality"
+
 type tabKind int
 
 const (
@@ -296,25 +298,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			formats = msg.formats
 		}
-		// Cache on active video tab
 		if tab := m.activeVideoTab(); tab != nil {
 			tab.formats = formats
 		}
-		m.picker.Show(formats, m.width, m.height)
+		m.picker.Show(picker.TargetQuality, qualityPickerTitle, formatOptions(formats), m.width, m.height)
 		m.pendingVideoURL = msg.url
 		return m, nil
 
 	case picker.SelectedMsg:
-		if m.pendingVideoURL != "" {
-			url := m.pendingVideoURL
-			quality := msg.Format.ID
-			m.pendingVideoURL = ""
-			return m, playVideoCmd(url, quality, m.cfg.Player.Video.Command, m.cfg.Player.Video.Args)
+		switch msg.Target {
+		case picker.TargetQuality:
+			if m.pendingVideoURL != "" {
+				url := m.pendingVideoURL
+				m.pendingVideoURL = ""
+				return m, playVideoCmd(url, msg.Key, m.cfg.Player.Video.Command, m.cfg.Player.Video.Args)
+			}
+		default:
+			return m, m.setStatus(fmt.Sprintf("unknown picker target: %d", msg.Target), 3*time.Second)
 		}
 		return m, nil
 
 	case picker.CancelledMsg:
-		m.pendingVideoURL = ""
+		switch msg.Target {
+		case picker.TargetQuality:
+			m.pendingVideoURL = ""
+		}
 		return m, nil
 
 	case playerErrorMsg:
@@ -745,14 +753,21 @@ func (m *Model) quickPlay() tea.Cmd {
 	return playVideoCmd(v.URL, m.cfg.Player.Video.Quality, m.cfg.Player.Video.Command, m.cfg.Player.Video.Args)
 }
 
+func formatOptions(formats []player.Format) []picker.Option {
+	opts := make([]picker.Option, len(formats))
+	for i, f := range formats {
+		opts[i] = picker.Option{Key: f.ID, Label: f.Display}
+	}
+	return opts
+}
+
 func (m *Model) fetchFormatsAndPlay() tea.Cmd {
 	v := m.selectedVideo()
 	if v == nil {
 		return nil
 	}
-	// Use cached formats from the active video tab if available
 	if tab := m.activeVideoTab(); tab != nil && len(tab.formats) > 0 {
-		m.picker.Show(tab.formats, m.width, m.height)
+		m.picker.Show(picker.TargetQuality, qualityPickerTitle, formatOptions(tab.formats), m.width, m.height)
 		m.pendingVideoURL = v.URL
 		return nil
 	}
