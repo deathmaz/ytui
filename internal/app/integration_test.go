@@ -3014,6 +3014,124 @@ func TestMusicMode_UnsubscribeFromArtistRemovesFromLibrary(t *testing.T) {
 	}
 }
 
+// TestMusicMode_UnsubscribeFromSongTabFlipsIndicator mirrors the video-mode
+// unsubscribe test for a song detail opened via -open.
+func TestMusicMode_UnsubscribeFromSongTabFlipsIndicator(t *testing.T) {
+	var unsubscribeCalls atomic.Int32
+	mc := &mockMusicClient{authenticated: true}
+	ytc := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{
+				ID: id, Title: "Fake Song", ChannelName: "Fake Artist",
+				ChannelID: "UCartist", ChannelSubscribed: true, ChannelSubscribedKnown: true,
+			}, nil
+		},
+		unsubscribeFn: func(_ context.Context, channelID string) error {
+			if channelID != "UCartist" {
+				t.Errorf("Unsubscribe called with %q, want UCartist", channelID)
+			}
+			unsubscribeCalls.Add(1)
+			return nil
+		},
+	}
+	parsed := youtube.ParsedURL{Kind: youtube.URLVideo, ID: "songid"}
+	m := NewMusic(mc, ytc, testConfig(), ytimage.NewRenderer(), Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	waitForContent(t, tm, "✓ Subscribed")
+
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Unsubscribe")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "○ Not subscribed")
+
+	mm := quitAndGetMusicModel(t, tm)
+	if unsubscribeCalls.Load() != 1 {
+		t.Fatalf("Unsubscribe calls = %d, want 1", unsubscribeCalls.Load())
+	}
+	tab := mm.tabs.Active()
+	if tab == nil || tab.kind != musicTabSong {
+		t.Fatalf("active tab = %+v, want song", tab)
+	}
+	v := tab.songDetail.Video()
+	if v == nil || !v.ChannelSubscribedKnown || v.ChannelSubscribed {
+		t.Errorf("song state not flipped: %+v", v)
+	}
+}
+
+// TestMusicMode_SubscribePropagatesToOpenTabs mirrors the video-mode
+// multi-tab propagation test: artist + song tabs for the same channel are
+// both flipped by a single Subscribe action.
+func TestMusicMode_SubscribePropagatesToOpenTabs(t *testing.T) {
+	var subscribeCalls atomic.Int32
+	mc := &mockMusicClient{
+		authenticated: true,
+		getArtistFn: func(_ context.Context, _ string) (*youtube.MusicArtistPage, error) {
+			return &youtube.MusicArtistPage{
+				Name: "Prop Artist", ChannelID: "UCprop",
+				Subscribed: false, SubscribedKnown: true,
+			}, nil
+		},
+	}
+	ytc := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(_ context.Context, id string) (*youtube.Video, error) {
+			return &youtube.Video{
+				ID: id, Title: "Prop Song", ChannelName: "Prop Artist",
+				ChannelID: "UCprop", ChannelSubscribed: false, ChannelSubscribedKnown: true,
+			}, nil
+		},
+		subscribeFn: func(_ context.Context, _ string) error {
+			subscribeCalls.Add(1)
+			return nil
+		},
+	}
+	// Open artist first so the song can still dedup tab IDs distinctly.
+	parsed := youtube.ParsedURL{Kind: youtube.URLChannel, ID: "UCprop"}
+	m := NewMusic(mc, ytc, testConfig(), ytimage.NewRenderer(), Options{OpenURL: &parsed})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	waitForContent(t, tm, "○ Not subscribed")
+
+	// Open a second tab for a song on the same channel directly via the
+	// internal selection msg — URL dialog typing would swallow the S key.
+	tm.Send(musicItemSelectedMsg{item: youtube.MusicItem{
+		Type: youtube.MusicSong, Title: "Prop Song", VideoID: "propsong",
+	}})
+	waitForContent(t, tm, "Prop Song")
+
+	// Return to the artist tab (tab 4) and subscribe.
+	sendKey(tm, "4")
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Subscribe")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "✓ Subscribed")
+
+	mm := quitAndGetMusicModel(t, tm)
+	if subscribeCalls.Load() != 1 {
+		t.Fatalf("Subscribe calls = %d, want 1", subscribeCalls.Load())
+	}
+	var artistOK, songOK bool
+	for i := range mm.tabs.All() {
+		tab := mm.tabs.At(i)
+		switch tab.kind {
+		case musicTabArtist:
+			if p := tab.artistPage; p != nil && p.SubscribedKnown && p.Subscribed {
+				artistOK = true
+			}
+		case musicTabSong:
+			if v := tab.songDetail.Video(); v != nil && v.ChannelSubscribedKnown && v.ChannelSubscribed {
+				songOK = true
+			}
+		}
+	}
+	if !artistOK {
+		t.Error("artist tab state not flipped")
+	}
+	if !songOK {
+		t.Error("song tab state not flipped")
+	}
+}
+
 // TestMusicMode_UnauthenticatedSubscribeBlocked asserts S without auth shows
 // the prompt and issues no Subscribe call.
 func TestMusicMode_UnauthenticatedSubscribeBlocked(t *testing.T) {

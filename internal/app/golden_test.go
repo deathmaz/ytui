@@ -599,6 +599,79 @@ func TestGolden_Music_ArtistPage_About(t *testing.T) {
 	waitThenCapture(t, tm, "✓ Subscribed")
 }
 
+// musicArtistAboutClient builds a mock music client whose artist surface
+// returns a page with the given name / channel / subscription state.
+// Shared by the artist About / picker / success goldens.
+func musicArtistAboutClient(browseID, name, channelID, subs string, subscribed bool) *mockMusicClient {
+	return &mockMusicClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, _, _ string) (*youtube.MusicSearchResult, error) {
+			return &youtube.MusicSearchResult{
+				Shelves: []youtube.MusicShelf{
+					{Title: "Artists", Items: []youtube.MusicItem{
+						{Title: name, Subtitle: "Artist", Type: youtube.MusicArtist, BrowseID: browseID},
+					}},
+				},
+			}, nil
+		},
+		getArtistFn: func(_ context.Context, _ string) (*youtube.MusicArtistPage, error) {
+			return &youtube.MusicArtistPage{
+				Name:            name,
+				ChannelID:       channelID,
+				SubscriberCount: subs,
+				Description:     "Synthetic artist for golden tests.",
+				Subscribed:      subscribed,
+				SubscribedKnown: true,
+				Shelves: []youtube.MusicShelf{
+					{Title: "Songs", Items: []youtube.MusicItem{
+						{Title: "Hit Song", Subtitle: name, Type: youtube.MusicSong, VideoID: "s1"},
+					}},
+				},
+			}, nil
+		},
+	}
+}
+
+func TestGolden_Music_ArtistPage_About_NotSubscribed(t *testing.T) {
+	mc := musicArtistAboutClient("artist1", "Test Artist", "UCartist1", "500 subscribers", false)
+	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
+	waitForContent(t, tm, "Test Artist")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitThenCapture(t, tm, "○ Not subscribed")
+}
+
+func TestGolden_Music_ArtistPage_SubscribePicker_NotSubscribed(t *testing.T) {
+	mc := musicArtistAboutClient("artist1", "Test Artist", "UCartist1", "500 subscribers", false)
+	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
+	waitForContent(t, tm, "Test Artist")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "○ Not subscribed")
+	sendKey(tm, "S")
+	waitThenCapture(t, tm, "Subscribe")
+}
+
+func TestGolden_Music_ArtistPage_SubscribePicker_Subscribed(t *testing.T) {
+	mc := musicArtistAboutClient("artist1", "Test Artist", "UCartist1", "500 subscribers", true)
+	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
+	waitForContent(t, tm, "Test Artist")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "✓ Subscribed")
+	sendKey(tm, "S")
+	waitThenCapture(t, tm, "Unsubscribe")
+}
+
+func TestGolden_Music_ArtistPage_SubscribeSuccess(t *testing.T) {
+	mc := musicArtistAboutClient("artist1", "Test Artist", "UCartist1", "500 subscribers", false)
+	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
+	waitForContent(t, tm, "Test Artist")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "○ Not subscribed")
+	sendKey(tm, "S")
+	waitForContent(t, tm, "Subscription")
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitThenCapture(t, tm, "Subscribed to Test Artist")
+}
+
 func TestGolden_Music_AlbumPage(t *testing.T) {
 	const thumbURL = "https://fake-thumb.example.com/album.jpg"
 	mc := &mockMusicClient{
