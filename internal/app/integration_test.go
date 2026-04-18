@@ -3204,8 +3204,6 @@ func TestMusicMode_ArtistSubTab_Autoload(t *testing.T) {
 			parsed := youtube.ParsedURL{Kind: youtube.URLChannel, ID: "UCfake"}
 			m := NewMusic(mc, &mockYTClient{authenticated: true}, testConfig(), nil, Options{OpenURL: &parsed})
 			tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
-			waitForContent(t, tm, "Fake Artist")
-			sendSpecialKey(tm, tea.KeyTab)
 			waitForContent(t, tm, "Song 0")
 
 			sendKey(tm, tc.key)
@@ -3219,10 +3217,10 @@ func TestMusicMode_ArtistSubTab_Autoload(t *testing.T) {
 			if tab == nil || tab.kind != musicTabArtist {
 				t.Fatalf("active tab = %+v, want artist", tab)
 			}
-			if tab.activeSubTab != 1 {
-				t.Fatalf("activeSubTab = %d, want 1 (Songs)", tab.activeSubTab)
+			if tab.activeSubTab != 0 {
+				t.Fatalf("activeSubTab = %d, want 0 (Songs)", tab.activeSubTab)
 			}
-			if idx := tab.artistSubs[1].list.Index(); idx != tc.wantCursorIdx {
+			if idx := tab.artistSubs[0].list.Index(); idx != tc.wantCursorIdx {
 				t.Errorf("list cursor index = %d, want %d", idx, tc.wantCursorIdx)
 			}
 			if strings.Contains(mm.status.Msg, "Loading all ") && tc.wantCalls == 0 {

@@ -556,12 +556,10 @@ func TestGolden_Music_ArtistPage(t *testing.T) {
 			}, nil
 		},
 	}
-	// Search → results → Enter to open artist → Tab past About to Songs.
+	// Search → results → Enter to open artist → lands on Songs sub-tab.
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
 	waitForContent(t, tm, "Test Artist")
 	sendSpecialKey(tm, tea.KeyEnter)
-	waitForContent(t, tm, "About")
-	sendSpecialKey(tm, tea.KeyTab)
 	waitThenCapture(t, tm, "Hit Song")
 }
 
@@ -594,9 +592,19 @@ func TestGolden_Music_ArtistPage_About(t *testing.T) {
 		},
 	}
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
+	openArtistAboutFromSearch(t, tm)
+	waitThenCapture(t, tm, "✓ Subscribed")
+}
+
+// openArtistAboutFromSearch opens the artist result, waits for the Songs
+// shelf to render, then Tabs to the About sub-tab. Assumes the first shelf
+// exposes a "Hit Song" item (true for musicArtistAboutClient and friends).
+func openArtistAboutFromSearch(t *testing.T, tm *teatest.TestModel) {
+	t.Helper()
 	waitForContent(t, tm, "Test Artist")
 	sendSpecialKey(tm, tea.KeyEnter)
-	waitThenCapture(t, tm, "✓ Subscribed")
+	waitForContent(t, tm, "Hit Song")
+	sendSpecialKey(tm, tea.KeyTab)
 }
 
 // musicArtistAboutClient builds a mock music client whose artist surface
@@ -635,16 +643,14 @@ func musicArtistAboutClient(browseID, name, channelID, subs string, subscribed b
 func TestGolden_Music_ArtistPage_About_NotSubscribed(t *testing.T) {
 	mc := musicArtistAboutClient("artist1", "Test Artist", "UCartist1", "500 subscribers", false)
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
-	waitForContent(t, tm, "Test Artist")
-	sendSpecialKey(tm, tea.KeyEnter)
+	openArtistAboutFromSearch(t, tm)
 	waitThenCapture(t, tm, "○ Not subscribed")
 }
 
 func TestGolden_Music_ArtistPage_SubscribePicker_NotSubscribed(t *testing.T) {
 	mc := musicArtistAboutClient("artist1", "Test Artist", "UCartist1", "500 subscribers", false)
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
-	waitForContent(t, tm, "Test Artist")
-	sendSpecialKey(tm, tea.KeyEnter)
+	openArtistAboutFromSearch(t, tm)
 	waitForContent(t, tm, "○ Not subscribed")
 	sendKey(tm, "S")
 	waitThenCapture(t, tm, "Subscribe")
@@ -653,8 +659,7 @@ func TestGolden_Music_ArtistPage_SubscribePicker_NotSubscribed(t *testing.T) {
 func TestGolden_Music_ArtistPage_SubscribePicker_Subscribed(t *testing.T) {
 	mc := musicArtistAboutClient("artist1", "Test Artist", "UCartist1", "500 subscribers", true)
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
-	waitForContent(t, tm, "Test Artist")
-	sendSpecialKey(tm, tea.KeyEnter)
+	openArtistAboutFromSearch(t, tm)
 	waitForContent(t, tm, "✓ Subscribed")
 	sendKey(tm, "S")
 	waitThenCapture(t, tm, "Unsubscribe")
@@ -663,8 +668,7 @@ func TestGolden_Music_ArtistPage_SubscribePicker_Subscribed(t *testing.T) {
 func TestGolden_Music_ArtistPage_SubscribeSuccess(t *testing.T) {
 	mc := musicArtistAboutClient("artist1", "Test Artist", "UCartist1", "500 subscribers", false)
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
-	waitForContent(t, tm, "Test Artist")
-	sendSpecialKey(tm, tea.KeyEnter)
+	openArtistAboutFromSearch(t, tm)
 	waitForContent(t, tm, "○ Not subscribed")
 	sendKey(tm, "S")
 	waitForContent(t, tm, "Subscription")
@@ -786,13 +790,11 @@ func TestGolden_Music_ArtistPage_AlbumsSubTab(t *testing.T) {
 			}, nil
 		},
 	}
-	// Search → Enter to open artist → Tab past About (0) and Songs (1) to Albums (2).
+	// Search → Enter to open artist → lands on Songs (0), Tab to Albums (1).
 	tm := newTestMusicProgramWithOpts(t, nil, mc, nil, Options{SearchQuery: "artist"})
 	waitForContent(t, tm, "Test Artist")
 	sendSpecialKey(tm, tea.KeyEnter)
 	time.Sleep(400 * time.Millisecond)
-	sendSpecialKey(tm, tea.KeyTab)
-	time.Sleep(100 * time.Millisecond)
 	sendSpecialKey(tm, tea.KeyTab)
 	time.Sleep(200 * time.Millisecond)
 	captureGolden(t, tm)

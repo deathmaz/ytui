@@ -1092,12 +1092,10 @@ const artistAboutTabTitle = "About"
 
 func (m *MusicModel) buildArtistSubTabs(artist *youtube.MusicArtistPage) []subTab {
 	shelves := shelvesToSubTabs(artist.Shelves, m.musicListDelegate())
-	// Prepend About as the landing sub-tab so the artist's name, subscriber
-	// count, subscription state, and description are visible without extra
-	// navigation. The About entry has no list; renderArtistPage special-cases
-	// it.
-	about := []subTab{{title: artistAboutTabTitle, list: shared.NewList(m.musicListDelegate()), isAbout: true}}
-	return append(about, shelves...)
+	// Append About as the final sub-tab, matching the video-mode channel
+	// layout. renderArtistPage special-cases this entry via isAbout.
+	about := subTab{title: artistAboutTabTitle, list: shared.NewList(m.musicListDelegate()), isAbout: true}
+	return append(shelves, about)
 }
 
 func (m *MusicModel) buildAlbumList(album *youtube.MusicAlbumPage) list.Model {
