@@ -53,7 +53,6 @@ type Model struct {
 	imgR         *ytimage.Renderer
 	thumbPlace   string
 	thumbPending bool
-	thumbFailed  bool
 }
 
 // New creates a new detail view model.
@@ -101,7 +100,6 @@ func (m *Model) LoadVideo(id string) tea.Cmd {
 	m.video = nil
 	m.thumbPlace = ""
 	m.thumbPending = false
-	m.thumbFailed = false
 	client := m.client
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
 		v, err := client.GetVideo(context.Background(), id)
@@ -181,8 +179,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if msg.Err == nil && msg.Placeholder != "" {
 				ytimage.RawWrite(msg.TransmitStr)
 				m.thumbPlace = msg.Placeholder
-			} else {
-				m.thumbFailed = true
 			}
 			if m.video != nil {
 				m.infoViewport.SetContent(m.renderInfo())

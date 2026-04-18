@@ -48,13 +48,7 @@ func init() {
 
 // ThumbList manages Kitty image transmit sequences for lists with thumbnails.
 // One ThumbList per renderer, shared across all lists using that renderer.
-//
-// Strategy: on every call, build a cheap fingerprint of which visible URLs
-// have cached images. If the fingerprint is identical to the previous call
-// (cursor blink, idle re-render) return the plain view — zero image
-// overhead. When the fingerprint differs (new image loaded, page change,
-// view switch) send DeleteAll + re-transmit ALL visible images. This is
-// the same as the pre-optimisation code, just not on every frame.
+// See WrapView for the transmit-diff strategy.
 type ThumbList struct {
 	imgR            *ytimage.Renderer
 	getURL          func(list.Item) string

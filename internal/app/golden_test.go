@@ -14,7 +14,11 @@ import (
 	"github.com/deathmaz/ytui/internal/youtube"
 )
 
-const goldenTimeout = 3 * time.Second
+const (
+	goldenTimeout = 3 * time.Second
+	goldenCols    = 80
+	goldenRows    = 24
+)
 
 func freshRender(t *testing.T, tm *teatest.TestModel) []byte {
 	t.Helper()
@@ -29,9 +33,9 @@ func freshRender(t *testing.T, tm *teatest.TestModel) []byte {
 	// WindowSizeMsgs in its channel and only the second is rendered,
 	// leaving the emulator without a first frame to populate cells that
 	// are unchanged in the second frame's diff.
-	tm.Send(tea.WindowSizeMsg{Width: 79, Height: 23})
+	tm.Send(tea.WindowSizeMsg{Width: goldenCols - 1, Height: goldenRows - 1})
 	time.Sleep(100 * time.Millisecond)
-	tm.Send(tea.WindowSizeMsg{Width: 80, Height: 24})
+	tm.Send(tea.WindowSizeMsg{Width: goldenCols, Height: goldenRows})
 	out := captureOneFrame(tm, 300*time.Millisecond, 3*time.Second)
 	if len(out) == 0 {
 		t.Fatal("captured output is empty after forced re-render")
@@ -86,7 +90,7 @@ func captureGolden(t *testing.T, tm *teatest.TestModel) {
 	// the resulting cell grid. Raw bytes are flaky under v2's diff renderer
 	// (one logical screen, many possible byte orderings); the emulated grid
 	// collapses those to the final on-screen state for stable diffs.
-	grid := emulateGrid(normalizeSpinner(out), 80, 24)
+	grid := emulateGrid(normalizeSpinner(out), goldenCols, goldenRows)
 	teatest.RequireEqualOutput(t, []byte(grid))
 }
 

@@ -1,54 +1,19 @@
 package channel
 
 import (
-	"bytes"
 	"context"
-	"os"
 	"strings"
-	"sync"
 	"testing"
 
 	"charm.land/bubbles/v2/list"
 	"github.com/deathmaz/ytui/internal/config"
 	ytimage "github.com/deathmaz/ytui/internal/image"
+	"github.com/deathmaz/ytui/internal/imagetest"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
 
-// lockedBuf captures raw writes from ytimage.RawWrite so tests can assert on
-// the APC byte stream that moved out of the View string in v2.
-type lockedBuf struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuf) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuf) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-func (b *lockedBuf) Reset() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.buf.Reset()
-}
-
-// installRawCapture swaps ytimage's raw writer to a test buffer for the
-// test's lifetime. Returns the buffer.
-func installRawCapture(t *testing.T) *lockedBuf {
-	t.Helper()
-	b := &lockedBuf{}
-	ytimage.SetRawOutput(b)
-	t.Cleanup(func() { ytimage.SetRawOutput(os.Stdout) })
-	return b
-}
+func installRawCapture(t *testing.T) *imagetest.Capture { return imagetest.Install(t) }
 
 type stubClient struct{ youtube.Client }
 
