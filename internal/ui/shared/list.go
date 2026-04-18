@@ -35,11 +35,18 @@ func AppendItems(l *list.Model, newItems []list.Item, shouldAppend bool) tea.Cmd
 }
 
 // ShouldLoadMore returns true when the cursor is within threshold items
-// of the end of the list. Use this after list.Update() to trigger
-// auto-loading of the next page.
+// of the end of the list. For lists shorter than or equal to the
+// threshold, it fires only at the very last item so short preview
+// shelves don't auto-paginate on the first `j`.
 func ShouldLoadMore(l list.Model, threshold int) bool {
 	total := len(l.Items())
-	return total > 0 && l.Index() >= total-threshold
+	if total == 0 {
+		return false
+	}
+	if total <= threshold {
+		return l.Index() == total-1
+	}
+	return l.Index() >= total-threshold
 }
 
 // NewList creates a list.Model with standard ytui settings.

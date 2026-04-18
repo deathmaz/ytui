@@ -475,10 +475,11 @@ func TestVideoMode_FeedPagination(t *testing.T) {
 		getFeedFn: func(_ context.Context, token string) (*youtube.Page[youtube.Video], error) {
 			page.Add(1)
 			if token == "" {
-				return &youtube.Page[youtube.Video]{
-					Items:     []youtube.Video{{ID: "p1v1", Title: "Page1 Video"}},
-					NextToken: "page2token",
-				}, nil
+				items := make([]youtube.Video, 10)
+				for i := range items {
+					items[i] = youtube.Video{ID: fmt.Sprintf("p1v%d", i), Title: fmt.Sprintf("Page1 Video %d", i)}
+				}
+				return &youtube.Page[youtube.Video]{Items: items, NextToken: "page2token"}, nil
 			}
 			return &youtube.Page[youtube.Video]{
 				Items: []youtube.Video{{ID: "p2v1", Title: "Page2 Video"}},
@@ -487,7 +488,7 @@ func TestVideoMode_FeedPagination(t *testing.T) {
 	}
 	tm := newTestVideoProgram(t, client)
 	sendKey(tm, "1")
-	waitForContent(t, tm, "Page1 Video")
+	waitForContent(t, tm, "Page1 Video 0")
 	sendKey(tm, "G")
 	time.Sleep(500 * time.Millisecond)
 	quitAndGetVideoModel(t, tm)
@@ -503,10 +504,11 @@ func TestVideoMode_SearchPagination(t *testing.T) {
 		searchFn: func(_ context.Context, query, token string) (*youtube.Page[youtube.Video], error) {
 			page.Add(1)
 			if token == "" {
-				return &youtube.Page[youtube.Video]{
-					Items:     []youtube.Video{{ID: "s1", Title: "Search Result 1"}},
-					NextToken: "searchpage2",
-				}, nil
+				items := make([]youtube.Video, 10)
+				for i := range items {
+					items[i] = youtube.Video{ID: fmt.Sprintf("s1v%d", i), Title: fmt.Sprintf("Search Result %d", i)}
+				}
+				return &youtube.Page[youtube.Video]{Items: items, NextToken: "searchpage2"}, nil
 			}
 			return &youtube.Page[youtube.Video]{
 				Items: []youtube.Video{{ID: "s2", Title: "Search Result Page2"}},
@@ -514,7 +516,7 @@ func TestVideoMode_SearchPagination(t *testing.T) {
 		},
 	}
 	tm := newTestVideoProgramWithOpts(t, client, Options{SearchQuery: "test"})
-	waitForContent(t, tm, "Search Result 1")
+	waitForContent(t, tm, "Search Result 0")
 	sendKey(tm, "G")
 	time.Sleep(500 * time.Millisecond)
 	quitAndGetVideoModel(t, tm)
@@ -3158,5 +3160,74 @@ func TestMusicMode_UnauthenticatedSubscribeBlocked(t *testing.T) {
 	}
 	if mm.picker.IsActive() {
 		t.Error("picker should not be active")
+	}
+}
+
+func TestMusicMode_ArtistSubTab_Autoload(t *testing.T) {
+	cases := []struct {
+		name           string
+		itemCount      int
+		key            string
+		wantCalls      int32
+		wantCursorIdx  int
+	}{
+		{"j at top of short shelf does not paginate", 3, "j", 0, 1},
+		{"G to bottom of short shelf paginates", 5, "G", 1, 4},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var browseMoreCalls atomic.Int32
+			items := make([]youtube.MusicItem, tc.itemCount)
+			for i := range items {
+				items[i] = youtube.MusicItem{
+					Title:   fmt.Sprintf("Song %d", i),
+					Type:    youtube.MusicSong,
+					VideoID: fmt.Sprintf("s%d", i),
+				}
+			}
+			mc := &mockMusicClient{
+				authenticated: true,
+				getArtistFn: func(_ context.Context, _ string) (*youtube.MusicArtistPage, error) {
+					return &youtube.MusicArtistPage{
+						Name: "Fake Artist",
+						Shelves: []youtube.MusicShelf{
+							{Title: "Songs", MoreBrowseID: "MPREL_more", MoreParams: "p", Items: items},
+						},
+					}, nil
+				},
+				browseMoreFn: func(_ context.Context, _, _ string) ([]youtube.MusicItem, error) {
+					browseMoreCalls.Add(1)
+					return nil, nil
+				},
+			}
+			parsed := youtube.ParsedURL{Kind: youtube.URLChannel, ID: "UCfake"}
+			m := NewMusic(mc, &mockYTClient{authenticated: true}, testConfig(), nil, Options{OpenURL: &parsed})
+			tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+			waitForContent(t, tm, "Fake Artist")
+			sendSpecialKey(tm, tea.KeyTab)
+			waitForContent(t, tm, "Song 0")
+
+			sendKey(tm, tc.key)
+			time.Sleep(300 * time.Millisecond)
+
+			mm := quitAndGetMusicModel(t, tm)
+			if got := browseMoreCalls.Load(); got != tc.wantCalls {
+				t.Errorf("BrowseMore calls = %d, want %d", got, tc.wantCalls)
+			}
+			tab := mm.tabs.Active()
+			if tab == nil || tab.kind != musicTabArtist {
+				t.Fatalf("active tab = %+v, want artist", tab)
+			}
+			if tab.activeSubTab != 1 {
+				t.Fatalf("activeSubTab = %d, want 1 (Songs)", tab.activeSubTab)
+			}
+			if idx := tab.artistSubs[1].list.Index(); idx != tc.wantCursorIdx {
+				t.Errorf("list cursor index = %d, want %d", idx, tc.wantCursorIdx)
+			}
+			if strings.Contains(mm.status.Msg, "Loading all ") && tc.wantCalls == 0 {
+				t.Errorf("status unexpectedly shows load-more spinner: %q", mm.status.Msg)
+			}
+		})
 	}
 }
