@@ -5,9 +5,10 @@ import (
 	"io"
 	"testing"
 	"time"
+	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/exp/teatest"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/exp/teatest/v2"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -17,18 +18,63 @@ const goldenTimeout = 3 * time.Second
 
 func freshRender(t *testing.T, tm *teatest.TestModel) []byte {
 	t.Helper()
+	// Settle pre-capture: drain and wait for the model to finish any
+	// in-flight async state changes (thumbnail fetches, spinner ticks
+	// that mutate loading flags, etc.) so the resize-triggered redraw
+	// reflects a stable view.
+	time.Sleep(150 * time.Millisecond)
 	io.ReadAll(tm.Output())
+	// Two resize frames with enough spacing for each to produce a flush.
+	// Without the sleep between sends, bubbletea coalesces the two
+	// WindowSizeMsgs in its channel and only the second is rendered,
+	// leaving the emulator without a first frame to populate cells that
+	// are unchanged in the second frame's diff.
+	tm.Send(tea.WindowSizeMsg{Width: 79, Height: 23})
+	time.Sleep(100 * time.Millisecond)
 	tm.Send(tea.WindowSizeMsg{Width: 80, Height: 24})
-	time.Sleep(20 * time.Millisecond)
-	out := readAll(t, tm.Output())
-	if len(out) == 0 {
-		time.Sleep(200 * time.Millisecond)
-		out = readAll(t, tm.Output())
-	}
+	out := captureOneFrame(tm, 300*time.Millisecond, 3*time.Second)
 	if len(out) == 0 {
 		t.Fatal("captured output is empty after forced re-render")
 	}
 	return out
+}
+
+// captureOneFrame waits for the first burst of output, then reads for a
+// fixed window before stopping. Raw-byte captures are inherently timing-
+// sensitive under diff rendering: the Cursed Renderer emits the initial
+// frame in 1–2 short bursts (content + trailing border fill) then falls
+// silent until the next spinner tick (~100ms). A fixed capture window that
+// spans the burst tail but stops before the first spinner tick keeps
+// goldens deterministic across machines.
+//
+// captureWindow should be long enough to catch the trailing border diff
+// (~60ms observed) but shorter than the spinner tick (100ms).
+func captureOneFrame(tm *teatest.TestModel, captureWindow, hardDeadline time.Duration) []byte {
+	var collected []byte
+	deadline := time.Now().Add(hardDeadline)
+	startPoll := 5 * time.Millisecond
+	// Wait for the first byte to arrive.
+	for time.Now().Before(deadline) {
+		chunk, _ := io.ReadAll(tm.Output())
+		if len(chunk) > 0 {
+			collected = append(collected, chunk...)
+			break
+		}
+		time.Sleep(startPoll)
+	}
+	if len(collected) == 0 {
+		return nil
+	}
+	// After the first byte, read for a fixed window then stop.
+	windowEnd := time.Now().Add(captureWindow)
+	for time.Now().Before(windowEnd) {
+		time.Sleep(10 * time.Millisecond)
+		chunk, _ := io.ReadAll(tm.Output())
+		if len(chunk) > 0 {
+			collected = append(collected, chunk...)
+		}
+	}
+	return collected
 }
 
 func captureGolden(t *testing.T, tm *teatest.TestModel) {
@@ -36,7 +82,33 @@ func captureGolden(t *testing.T, tm *teatest.TestModel) {
 	out := freshRender(t, tm)
 	tm.Quit()
 	tm.WaitFinished(t, teatest.WithFinalTimeout(goldenTimeout))
-	teatest.RequireEqualOutput(t, out)
+	// Feed the raw byte stream through a minimal VT100 emulator and snapshot
+	// the resulting cell grid. Raw bytes are flaky under v2's diff renderer
+	// (one logical screen, many possible byte orderings); the emulated grid
+	// collapses those to the final on-screen state for stable diffs.
+	grid := emulateGrid(normalizeSpinner(out), 80, 24)
+	teatest.RequireEqualOutput(t, []byte(grid))
+}
+
+// normalizeSpinner replaces all Braille-pattern spinner glyphs (U+2800–U+28FF)
+// with a fixed byte sequence so golden captures are stable across spinner
+// tick frames. The default bubbles spinner cycles through Braille chars; v2's
+// Cursed Renderer emits a new diff each tick, making any capture that spans
+// a tick non-deterministic.
+func normalizeSpinner(b []byte) []byte {
+	var out []byte
+	fixed := []byte("*")
+	for i := 0; i < len(b); {
+		r, size := utf8.DecodeRune(b[i:])
+		if r >= 0x2800 && r <= 0x28FF {
+			out = append(out, fixed...)
+			i += size
+			continue
+		}
+		out = append(out, b[i:i+size]...)
+		i += size
+	}
+	return out
 }
 
 func waitThenCapture(t *testing.T, tm *teatest.TestModel, waitFor string) {

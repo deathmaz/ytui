@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/deathmaz/ytui/internal/config"
 	"github.com/deathmaz/ytui/internal/download"
 	"github.com/deathmaz/ytui/internal/state"
@@ -422,7 +422,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) View() string {
+func (m *Model) View() tea.View {
 	var statusLine string
 	if m.status.Msg != "" {
 		statusLine = styles.Accent.Render(m.status.Msg)
@@ -430,14 +430,16 @@ func (m *Model) View() string {
 		statusLine = styles.Dim.Render("Downloading...")
 	}
 
-	return RenderShell(
+	v := tea.NewView(RenderShell(
 		m.width,
 		[]ModalView{&m.urlInput, &m.picker},
 		m.renderTabs,
 		m.renderContent,
 		statusLine,
 		statusBarStyle.Render(m.help.View(m.keys)),
-	)
+	))
+	v.AltScreen = true
+	return v
 }
 
 // drainPending wraps pendingState.drain with this mode's open/restore fns.

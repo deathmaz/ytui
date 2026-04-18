@@ -1,16 +1,54 @@
 package channel
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
+	"charm.land/bubbles/v2/list"
 	"github.com/deathmaz/ytui/internal/config"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
+
+// lockedBuf captures raw writes from ytimage.RawWrite so tests can assert on
+// the APC byte stream that moved out of the View string in v2.
+type lockedBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *lockedBuf) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
+// installRawCapture swaps ytimage's raw writer to a test buffer for the
+// test's lifetime. Returns the buffer.
+func installRawCapture(t *testing.T) *lockedBuf {
+	t.Helper()
+	b := &lockedBuf{}
+	ytimage.SetRawOutput(b)
+	t.Cleanup(func() { ytimage.SetRawOutput(os.Stdout) })
+	return b
+}
 
 type stubClient struct{ youtube.Client }
 
@@ -196,9 +234,10 @@ func TestRenderSpinner_IncludesDeleteAll(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			cap := installRawCapture(t)
 			tt.setup()
-			out := tt.render()
-			if !strings.Contains(out, deleteAll) {
+			_ = tt.render()
+			if !strings.Contains(cap.String(), deleteAll) {
 				t.Errorf("loading spinner should include DeleteAll to clear stale images")
 			}
 		})
@@ -208,6 +247,7 @@ func TestRenderSpinner_IncludesDeleteAll(t *testing.T) {
 // TestRenderPosts_RoutedThroughWrapView verifies that even loaded posts
 // (which have no thumbnails) route through WrapView to clear stale images.
 func TestRenderPosts_RoutedThroughWrapView(t *testing.T) {
+	cap := installRawCapture(t)
 	imgR := ytimage.NewRendererWithMax(200)
 	m := newTestChannel(imgR, 5)
 
@@ -218,15 +258,16 @@ func TestRenderPosts_RoutedThroughWrapView(t *testing.T) {
 
 	// Invalidate (as onTabSwitch does for posts).
 	m.thumbList.Invalidate()
-	out := m.renderPosts()
+	_ = m.renderPosts()
 	deleteAll := ytimage.DeleteAll()
-	if !strings.Contains(out, deleteAll) {
+	if !strings.Contains(cap.String(), deleteAll) {
 		t.Error("posts view should include DeleteAll after invalidation to clear stale video images")
 	}
 
 	// Subsequent render should skip (no more DeleteAll).
-	out2 := m.renderPosts()
-	if strings.Contains(out2, deleteAll) {
+	cap.Reset()
+	_ = m.renderPosts()
+	if strings.Contains(cap.String(), deleteAll) {
 		t.Error("posts view should not include DeleteAll on subsequent stable frames")
 	}
 }
@@ -234,6 +275,7 @@ func TestRenderPosts_RoutedThroughWrapView(t *testing.T) {
 // TestOnTabSwitch_PostsInvalidates verifies that switching to the posts
 // sub-tab invalidates the video ThumbList so stale images are cleared.
 func TestOnTabSwitch_PostsInvalidates(t *testing.T) {
+	cap := installRawCapture(t)
 	imgR := ytimage.NewRendererWithMax(200)
 	m := newTestChannel(imgR, 5)
 
@@ -258,8 +300,9 @@ func TestOnTabSwitch_PostsInvalidates(t *testing.T) {
 	m.onTabSwitch()
 
 	// renderPosts should now include DeleteAll.
-	out := m.renderPosts()
-	if !strings.Contains(out, ytimage.DeleteAll()) {
+	cap.Reset()
+	_ = m.renderPosts()
+	if !strings.Contains(cap.String(), ytimage.DeleteAll()) {
 		t.Error("after switching to posts, renderPosts should clear stale video images")
 	}
 }

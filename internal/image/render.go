@@ -4,7 +4,7 @@ import (
 	"container/list"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // ThumbnailLoadedMsg is sent when a thumbnail has been fetched and encoded.

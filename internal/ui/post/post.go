@@ -3,12 +3,11 @@ package post
 import (
 	"context"
 	"strings"
-	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/deathmaz/ytui/internal/ui/comments"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/shared"
@@ -25,8 +24,6 @@ const (
 
 var subTabNames = []string{"Post", "Comments"}
 
-type clearTransmitMsg struct{}
-
 // Model is the post detail view with Post/Comments sub-tabs.
 type Model struct {
 	activeTab    int
@@ -36,11 +33,10 @@ type Model struct {
 	spinner      spinner.Model
 	client       youtube.Client
 	imgR         *ytimage.Renderer
-	thumbTransmit string
-	thumbPlace    string
-	thumbPending  bool
-	width         int
-	height        int
+	thumbPlace   string
+	thumbPending bool
+	width        int
+	height       int
 }
 
 // New creates a new post detail view.
@@ -59,8 +55,8 @@ func (m *Model) SetSize(w, h int) {
 	if vh < 1 {
 		vh = 1
 	}
-	m.infoViewport.Width = w
-	m.infoViewport.Height = vh
+	m.infoViewport.SetWidth(w)
+	m.infoViewport.SetHeight(vh)
 	m.comments.SetSize(w, vh)
 }
 
@@ -68,7 +64,6 @@ func (m *Model) SetSize(w, h int) {
 func (m *Model) Load(p youtube.Post) tea.Cmd {
 	m.post = p
 	m.activeTab = tabContent
-	m.thumbTransmit = ""
 	m.thumbPlace = ""
 	m.thumbPending = false
 
@@ -76,7 +71,7 @@ func (m *Model) Load(p youtube.Post) tea.Cmd {
 	if vh < 1 {
 		vh = 1
 	}
-	m.infoViewport = viewport.New(m.width, vh)
+	m.infoViewport = viewport.New(viewport.WithWidth(m.width), viewport.WithHeight(vh))
 
 	var cmds []tea.Cmd
 
@@ -130,17 +125,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.imgR != nil && m.thumbPending && m.imgR.HandleLoaded(msg) {
 			m.thumbPending = false
 			if msg.Err == nil && msg.Placeholder != "" {
-				m.thumbTransmit = msg.TransmitStr
+				ytimage.RawWrite(msg.TransmitStr)
 				m.thumbPlace = msg.Placeholder
-				cmds = append(cmds, scheduleClearTransmit())
 			}
 			m.infoViewport.SetContent(m.renderPostContent())
 		}
 		return m, tea.Batch(cmds...)
-
-	case clearTransmitMsg:
-		m.thumbTransmit = ""
-		return m, nil
 
 	case tea.KeyMsg:
 		switch {
@@ -181,17 +171,7 @@ func (m Model) View() string {
 		content = m.comments.View()
 	}
 
-	view := lipgloss.JoinVertical(lipgloss.Left, subBar, content)
-	if m.thumbTransmit != "" {
-		view = m.thumbTransmit + view
-	}
-	return view
-}
-
-func scheduleClearTransmit() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return clearTransmitMsg{}
-	})
+	return lipgloss.JoinVertical(lipgloss.Left, subBar, content)
 }
 
 func (m *Model) renderPostContent() string {

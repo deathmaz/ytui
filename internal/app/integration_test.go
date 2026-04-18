@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/exp/teatest"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/exp/teatest/v2"
 	"github.com/deathmaz/ytui/internal/config"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/player"
@@ -1275,12 +1275,14 @@ func wrapViewStabilize(tl *shared.ThumbList, items []list.Item, view string) {
 	for i := 0; i < 5; i++ {
 		tl.WrapView(items, view)
 	}
+	drainCapturedRawWrites()
 }
 
 // TestVideoMode_WrapViewSkipsOnStableFrame verifies that after thumbnails are
 // fully loaded, subsequent View() calls return plain view (no DeleteAll or
 // transmit sequences). This is the core flicker-prevention optimisation.
 func TestVideoMode_WrapViewSkipsOnStableFrame(t *testing.T) {
+	cap := captureRawWrites(t)
 	cfg := testConfig()
 	cfg.Thumbnails.Enabled = true
 	cfg.Thumbnails.Height = 5
@@ -1301,19 +1303,22 @@ func TestVideoMode_WrapViewSkipsOnStableFrame(t *testing.T) {
 	}
 
 	// First + repeat calls transmit.
-	out1 := tl.WrapView(items, "view")
-	if out1 == "view" {
+	cap.Reset()
+	tl.WrapView(items, "view")
+	if cap.String() == "" {
 		t.Error("first call should transmit, not skip")
 	}
-	out2 := tl.WrapView(items, "view")
-	if out2 == "view" {
+	cap.Reset()
+	tl.WrapView(items, "view")
+	if cap.String() == "" {
 		t.Error("repeat call should transmit, not skip")
 	}
 
 	// Subsequent calls must skip (cursor blink frames).
 	for i := 0; i < 3; i++ {
-		out := tl.WrapView(items, "view")
-		if out != "view" {
+		cap.Reset()
+		tl.WrapView(items, "view")
+		if cap.String() != "" {
 			t.Errorf("frame %d: expected plain view (skip), got output with image data", i)
 		}
 	}
@@ -1323,6 +1328,7 @@ func TestVideoMode_WrapViewSkipsOnStableFrame(t *testing.T) {
 // feed (Load with force=true) invalidates the ThumbList so thumbnails
 // re-transmit when the feed reloads after the loading spinner.
 func TestVideoMode_WrapViewInvalidateOnFeedRefresh(t *testing.T) {
+	cap := captureRawWrites(t)
 	cfg := testConfig()
 	cfg.Thumbnails.Enabled = true
 	cfg.Thumbnails.Height = 5
@@ -1345,7 +1351,9 @@ func TestVideoMode_WrapViewInvalidateOnFeedRefresh(t *testing.T) {
 
 	// Stabilise.
 	wrapViewStabilize(tl, items, "V")
-	if out := tl.WrapView(items, "V"); out != "V" {
+	cap.Reset()
+	tl.WrapView(items, "V")
+	if cap.String() != "" {
 		t.Fatal("expected stable skip before refresh")
 	}
 
@@ -1353,7 +1361,9 @@ func TestVideoMode_WrapViewInvalidateOnFeedRefresh(t *testing.T) {
 	m.feed.Load(true)
 
 	// Next WrapView must retransmit.
-	if out := tl.WrapView(items, "V"); out == "V" {
+	cap.Reset()
+	tl.WrapView(items, "V")
+	if cap.String() == "" {
 		t.Error("after feed refresh, WrapView should retransmit, not skip")
 	}
 }
@@ -1363,6 +1373,7 @@ func TestVideoMode_WrapViewInvalidateOnFeedRefresh(t *testing.T) {
 // detects the gen mismatch and retransmits. This covers the scenario of
 // switching between channel videos and playlists sub-tabs.
 func TestVideoMode_CrossThumbListGenCounter(t *testing.T) {
+	cap := captureRawWrites(t)
 	cfg := testConfig()
 	cfg.Thumbnails.Enabled = true
 	cfg.Thumbnails.Height = 5
@@ -1389,17 +1400,23 @@ func TestVideoMode_CrossThumbListGenCounter(t *testing.T) {
 
 	// Stabilise listThumbList.
 	wrapViewStabilize(listTL, vidItems, "V")
-	if out := listTL.WrapView(vidItems, "V"); out != "V" {
+	cap.Reset()
+	listTL.WrapView(vidItems, "V")
+	if cap.String() != "" {
 		t.Fatal("listThumbList should be stable")
 	}
 
 	// plThumbList transmits (sends DeleteAll, bumps gen).
-	if out := plTL.WrapView(plItems, "PV"); out == "PV" {
+	cap.Reset()
+	plTL.WrapView(plItems, "PV")
+	if cap.String() == "" {
 		t.Fatal("plThumbList should transmit on first call")
 	}
 
 	// listThumbList must detect gen mismatch and retransmit.
-	if out := listTL.WrapView(vidItems, "V"); out == "V" {
+	cap.Reset()
+	listTL.WrapView(vidItems, "V")
+	if cap.String() == "" {
 		t.Error("listThumbList should retransmit after plThumbList's DeleteAll (gen mismatch)")
 	}
 }
@@ -1408,6 +1425,7 @@ func TestVideoMode_CrossThumbListGenCounter(t *testing.T) {
 // music home view invalidates the ThumbList so thumbnails re-transmit
 // when the home tab renders after the loading spinner.
 func TestMusicMode_WrapViewInvalidateOnHomeLoad(t *testing.T) {
+	cap := captureRawWrites(t)
 	cfg := testConfig()
 	cfg.Thumbnails.Enabled = true
 	cfg.Thumbnails.Height = 5
@@ -1431,14 +1449,18 @@ func TestMusicMode_WrapViewInvalidateOnHomeLoad(t *testing.T) {
 		Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/song.jpg", Width: 226}},
 	}}}
 	wrapViewStabilize(tl, fakeItems, "V")
-	if out := tl.WrapView(fakeItems, "V"); out != "V" {
+	cap.Reset()
+	tl.WrapView(fakeItems, "V")
+	if cap.String() != "" {
 		t.Fatal("expected stable skip before loadHome")
 	}
 
 	// loadHome sets homeLoading=true and calls Invalidate.
 	m.loadHome()
 
-	if out := tl.WrapView(fakeItems, "V"); out == "V" {
+	cap.Reset()
+	tl.WrapView(fakeItems, "V")
+	if cap.String() == "" {
 		t.Error("after loadHome, WrapView should retransmit, not skip")
 	}
 }
@@ -1446,6 +1468,7 @@ func TestMusicMode_WrapViewInvalidateOnHomeLoad(t *testing.T) {
 // TestMusicMode_WrapViewInvalidateOnLibraryLoad verifies that loading the
 // music library invalidates the ThumbList.
 func TestMusicMode_WrapViewInvalidateOnLibraryLoad(t *testing.T) {
+	cap := captureRawWrites(t)
 	cfg := testConfig()
 	cfg.Thumbnails.Enabled = true
 	cfg.Thumbnails.Height = 5
@@ -1469,13 +1492,17 @@ func TestMusicMode_WrapViewInvalidateOnLibraryLoad(t *testing.T) {
 		Thumbnails: []youtube.Thumbnail{{URL: "https://fake.test/song.jpg", Width: 226}},
 	}}}
 	wrapViewStabilize(tl, fakeItems, "V")
-	if out := tl.WrapView(fakeItems, "V"); out != "V" {
+	cap.Reset()
+	tl.WrapView(fakeItems, "V")
+	if cap.String() != "" {
 		t.Fatal("expected stable skip before loadLibrary")
 	}
 
 	m.loadLibrary()
 
-	if out := tl.WrapView(fakeItems, "V"); out == "V" {
+	cap.Reset()
+	tl.WrapView(fakeItems, "V")
+	if cap.String() == "" {
 		t.Error("after loadLibrary, WrapView should retransmit, not skip")
 	}
 }
@@ -1653,6 +1680,7 @@ func TestMusicMode_RefetchOnArtistSubTabSwitch(t *testing.T) {
 // in feed, search, and playlist views route through WrapView so that
 // DELETE_STALE fires immediately after Invalidate().
 func TestVideoMode_SpinnerRoutedThroughWrapView(t *testing.T) {
+	cap := captureRawWrites(t)
 	cfg := testConfig()
 	cfg.Thumbnails.Enabled = true
 	cfg.Thumbnails.Height = 5
@@ -1672,8 +1700,9 @@ func TestVideoMode_SpinnerRoutedThroughWrapView(t *testing.T) {
 
 		// Switch to feed → Load triggers Invalidate + spinner.
 		m.feed.Load(true)
-		out := m.feed.View()
-		if !strings.Contains(out, deleteAll) {
+		cap.Reset()
+		m.feed.View()
+		if !strings.Contains(cap.String(), deleteAll) {
 			t.Error("feed spinner should include DeleteAll via WrapView")
 		}
 	})
@@ -1697,8 +1726,9 @@ func TestVideoMode_SpinnerRoutedThroughWrapView(t *testing.T) {
 		// Trigger a search → Invalidate + searching spinner.
 		m.search.SetQuery("test")
 		m.search.Refresh()
-		out := m.search.View()
-		if !strings.Contains(out, deleteAll) {
+		cap.Reset()
+		m.search.View()
+		if !strings.Contains(cap.String(), deleteAll) {
 			t.Error("search spinner should include DeleteAll via WrapView")
 		}
 	})
@@ -1707,6 +1737,7 @@ func TestVideoMode_SpinnerRoutedThroughWrapView(t *testing.T) {
 // TestVideoMode_DetailTabWrappedWithWrapView verifies that opening a video
 // detail tab clears stale list thumbnails via WrapView(nil, ...).
 func TestVideoMode_DetailTabWrappedWithWrapView(t *testing.T) {
+	cap := captureRawWrites(t)
 	cfg := testConfig()
 	cfg.Thumbnails.Enabled = true
 	cfg.Thumbnails.Height = 5
@@ -1732,15 +1763,17 @@ func TestVideoMode_DetailTabWrappedWithWrapView(t *testing.T) {
 	m.openVideoTab(&youtube.Video{ID: "v1", Title: "Test"})
 
 	// renderContent wraps detail with WrapView(nil, ...).
-	out := m.renderContent()
+	cap.Reset()
+	m.renderContent()
 	deleteAll := ytimage.DeleteAll()
-	if !strings.Contains(out, deleteAll) {
+	if !strings.Contains(cap.String(), deleteAll) {
 		t.Error("detail tab should include DeleteAll to clear stale list images")
 	}
 
 	// Second render should skip (no more DeleteAll).
-	out2 := m.renderContent()
-	if strings.Contains(out2, deleteAll) {
+	cap.Reset()
+	m.renderContent()
+	if strings.Contains(cap.String(), deleteAll) {
 		t.Error("detail tab should not send DeleteAll on stable frames")
 	}
 }
@@ -1748,6 +1781,7 @@ func TestVideoMode_DetailTabWrappedWithWrapView(t *testing.T) {
 // TestVideoMode_SubsViewWrappedWithWrapView verifies that the subs view
 // (which has no thumbnails) clears stale images via WrapView(nil, ...).
 func TestVideoMode_SubsViewWrappedWithWrapView(t *testing.T) {
+	cap := captureRawWrites(t)
 	cfg := testConfig()
 	cfg.Thumbnails.Enabled = true
 	cfg.Thumbnails.Height = 5
@@ -1767,9 +1801,10 @@ func TestVideoMode_SubsViewWrappedWithWrapView(t *testing.T) {
 	m.switchTo(ViewSubs)
 	m.listThumbList.Invalidate()
 
-	out := m.renderContent()
+	cap.Reset()
+	m.renderContent()
 	deleteAll := ytimage.DeleteAll()
-	if !strings.Contains(out, deleteAll) {
+	if !strings.Contains(cap.String(), deleteAll) {
 		t.Error("subs view should include DeleteAll to clear stale list images")
 	}
 }
@@ -2356,10 +2391,13 @@ func TestMusicMode_CloseRestoredTabLoadsNextRestored(t *testing.T) {
 	sendKey(tm, "5")
 	waitForContent(t, tm, "Loaded fake_song_041")
 
-	// Close it — should load the first tab
+	// Close it — should load the first tab. Poll the counter since the
+	// Cursed Renderer only emits diff updates, so the pre/post titles
+	// (which differ by a single digit) never appear as contiguous bytes
+	// in the output stream.
 	getVideoCalls.Store(0)
 	sendSpecialKey(tm, tea.KeyEscape)
-	waitForContent(t, tm, "Loaded fake_song_040")
+	waitForCounter(t, &getVideoCalls, 1, 3*time.Second)
 
 	m := quitAndGetMusicModel(t, tm)
 	if m.tabs.Len() != 1 {

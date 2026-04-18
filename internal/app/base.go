@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/deathmaz/ytui/internal/auth"
 	"github.com/deathmaz/ytui/internal/config"
 	"github.com/deathmaz/ytui/internal/state"
@@ -95,7 +95,7 @@ func (s *StatusManager) HandleClear(msg clearStatusMsg) bool {
 func HandleWindowSize(msg tea.WindowSizeMsg, width, height *int, h *help.Model) {
 	*width = msg.Width
 	*height = msg.Height
-	h.Width = msg.Width
+	h.SetWidth(msg.Width)
 }
 
 // AuthResult is the message returned by the shared authenticate command.

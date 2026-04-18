@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/deathmaz/ytui/internal/ui/comments"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/ui/shared"
@@ -40,8 +39,6 @@ type VideoLoadedMsg struct {
 	Err   error
 }
 
-type clearTransmitMsg struct{}
-
 // Model is the video detail view with Info and Comments sub-tabs.
 type Model struct {
 	activeTab    int // 0=Info, 1=Comments
@@ -54,10 +51,9 @@ type Model struct {
 	height       int
 	client       youtube.Client
 	imgR         *ytimage.Renderer
-	thumbTransmit string
-	thumbPlace    string
-	thumbPending  bool
-	thumbFailed   bool
+	thumbPlace   string
+	thumbPending bool
+	thumbFailed  bool
 }
 
 // New creates a new detail view model.
@@ -90,8 +86,8 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	vh := m.viewportHeight()
-	m.infoViewport.Width = w
-	m.infoViewport.Height = vh
+	m.infoViewport.SetWidth(w)
+	m.infoViewport.SetHeight(vh)
 	m.comments.SetSize(w, vh)
 	if m.video != nil && m.activeTab == tabInfo {
 		m.infoViewport.SetContent(m.renderInfo())
@@ -103,7 +99,6 @@ func (m *Model) LoadVideo(id string) tea.Cmd {
 	m.loading = true
 	m.activeTab = tabInfo
 	m.video = nil
-	m.thumbTransmit = ""
 	m.thumbPlace = ""
 	m.thumbPending = false
 	m.thumbFailed = false
@@ -142,13 +137,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		vh := m.viewportHeight()
 		if msg.Err != nil {
-			m.infoViewport = viewport.New(m.width, vh)
+			m.infoViewport = viewport.New(viewport.WithWidth(m.width), viewport.WithHeight(vh))
 			m.infoViewport.KeyMap = viewportKeyMap()
 			m.infoViewport.SetContent(fmt.Sprintf("Error loading video: %v", msg.Err))
 			return m, nil
 		}
 		m.video = msg.Video
-		m.infoViewport = viewport.New(m.width, vh)
+		m.infoViewport = viewport.New(viewport.WithWidth(m.width), viewport.WithHeight(vh))
 		m.infoViewport.KeyMap = viewportKeyMap()
 
 		// Start thumbnail fetch
@@ -157,9 +152,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if thumbURL != "" {
 				tx, pl := m.imgR.Get(thumbURL)
 				if pl != "" {
-					m.thumbTransmit = tx
+					// v2 renderer strips APC from View content; stream
+					// the Kitty transmit directly via the shared stdout
+					// lock. The placeholder grid stays in the View so
+					// Kitty paints the image at the right spot.
+					ytimage.RawWrite(tx)
 					m.thumbPlace = pl
-					cmds = append(cmds, scheduleClearTransmit())
 				} else {
 					m.thumbPending = true
 					cmds = append(cmds, m.imgR.FetchCmd(thumbURL, thumbCols, thumbRows))
@@ -181,9 +179,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.imgR != nil && m.imgR.HandleLoaded(msg) {
 			m.thumbPending = false
 			if msg.Err == nil && msg.Placeholder != "" {
-				m.thumbTransmit = msg.TransmitStr
+				ytimage.RawWrite(msg.TransmitStr)
 				m.thumbPlace = msg.Placeholder
-				cmds = append(cmds, scheduleClearTransmit())
 			} else {
 				m.thumbFailed = true
 			}
@@ -192,10 +189,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
-
-	case clearTransmitMsg:
-		m.thumbTransmit = ""
-		return m, nil
 
 	case comments.LoadedMsg, comments.RepliesLoadedMsg:
 		var cmd tea.Cmd
@@ -253,12 +246,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func scheduleClearTransmit() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return clearTransmitMsg{}
-	})
-}
-
 var subTabNames = []string{"Info", "Comments"}
 
 func (m Model) renderSubTabBar() string {
@@ -278,11 +265,7 @@ func (m Model) View() string {
 		content = m.comments.View()
 	}
 
-	view := lipgloss.JoinVertical(lipgloss.Left, subBar, content)
-	if m.thumbTransmit != "" {
-		view = m.thumbTransmit + view
-	}
-	return view
+	return lipgloss.JoinVertical(lipgloss.Left, subBar, content)
 }
 
 

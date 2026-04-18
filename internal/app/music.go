@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/deathmaz/ytui/internal/config"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/state"
@@ -65,11 +65,10 @@ type musicTab struct {
 	artistSubs   []subTab
 	activeSubTab int
 	// Album page
-	albumPage     *youtube.MusicAlbumPage
-	albumList     list.Model
-	thumbTransmit string
-	thumbPlace    string
-	thumbPending  bool
+	albumPage    *youtube.MusicAlbumPage
+	albumList    list.Model
+	thumbPlace   string
+	thumbPending bool
 	// Song detail (comments)
 	songDetail detail.Model
 	loaded     bool
@@ -111,15 +110,6 @@ const (
 	albumThumbCols = 13
 	albumThumbRows = 7
 )
-
-type musicClearTransmitMsg struct{}
-
-func musicClearTransmitCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return musicClearTransmitMsg{}
-	})
-}
-
 
 // musicItem wraps a MusicItem for the list component.
 type musicItem struct {
@@ -563,9 +553,8 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					thumbURL := shared.BestThumbnailURL(msg.Album.Thumbnails)
 					if thumbURL != "" {
 						if tx, pl := m.imgR.Get(thumbURL); pl != "" {
-							tab.thumbTransmit = tx
+							ytimage.RawWrite(tx)
 							tab.thumbPlace = pl
-							fetchCmd = musicClearTransmitCmd()
 						} else {
 							tab.thumbPending = true
 							fetchCmd = m.imgR.FetchCmd(thumbURL, albumThumbCols, albumThumbRows)
@@ -675,18 +664,12 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if len(tab.albumPage.Thumbnails) > 0 && shared.BestThumbnailURL(tab.albumPage.Thumbnails) == msg.URL {
 						tab.thumbPending = false
 						tx, pl := m.imgR.Get(msg.URL)
-						tab.thumbTransmit = tx
+						ytimage.RawWrite(tx)
 						tab.thumbPlace = pl
-						cmds = append(cmds, musicClearTransmitCmd())
 						break
 					}
 				}
 			}
-		}
-
-	case musicClearTransmitMsg:
-		for i := range m.tabs.All() {
-			m.tabs.At(i).thumbTransmit = ""
 		}
 
 	case clearStatusMsg:
@@ -712,7 +695,7 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *MusicModel) View() string {
+func (m *MusicModel) View() tea.View {
 	var statusLine string
 	if m.status.Msg != "" {
 		statusLine = styles.Accent.Render(m.status.Msg)
@@ -727,11 +710,9 @@ func (m *MusicModel) View() string {
 		statusBarStyle.Render(m.help.View(musicHelpAdapter{m.keys})),
 	)
 
-	if tab := m.activeTab(); tab != nil && tab.thumbTransmit != "" {
-		view = tab.thumbTransmit + view
-	}
-
-	return view
+	v := tea.NewView(view)
+	v.AltScreen = true
+	return v
 }
 
 func (m *MusicModel) loadHome() tea.Cmd {

@@ -3,12 +3,12 @@ package search
 import (
 	"context"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/deathmaz/ytui/internal/ui/shared"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 )
@@ -100,7 +100,7 @@ func (m *Model) SetSize(w, h int) {
 	inputView := inputStyle.Width(w).Render(m.input.View())
 	inputHeight := lipgloss.Height(inputView)
 	m.results.SetSize(w, h-inputHeight)
-	m.input.Width = w - 4
+	m.input.SetWidth(w - 4)
 }
 
 // Focus gives focus to the search input.

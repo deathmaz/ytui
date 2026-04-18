@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 )
 
@@ -168,13 +168,15 @@ func (t *ThumbList) WrapView(items []list.Item, view string) string {
 		if t.lastDeleteGen == 0 && t.lastFingerprint == "" {
 			thumbLog("[%p] DELETE_STALE  items=%d", t, len(seenURLs))
 			t.lastDeleteGen = globalDeleteGen.Add(1)
-			return ytimage.DeleteAll() + view
+			ytimage.RawWrite(ytimage.DeleteAll())
+			return view
 		}
 		if t.lastFingerprint != "" {
 			thumbLog("[%p] DELETE_STALE (fp_cleared)  items=%d", t, len(seenURLs))
 			t.lastFingerprint = ""
 			t.lastDeleteGen = globalDeleteGen.Add(1)
-			return ytimage.DeleteAll() + view
+			ytimage.RawWrite(ytimage.DeleteAll())
+			return view
 		}
 		thumbLog("[%p] SKIP (no cached)  items=%d", t, len(seenURLs))
 		return view
@@ -215,13 +217,17 @@ func (t *ThumbList) WrapView(items []list.Item, view string) string {
 			t, reason, oldGen, t.lastDeleteGen, urls)
 	}
 
+	// v2's Cursed Renderer drops APC sequences embedded in the View string
+	// (ultraviolet's cell parser overwrites accumulated escape prefixes with
+	// the next printable rune). Write the Kitty transmit sequences directly
+	// to stdout via a mutex shared with the renderer's writer instead.
 	var tx strings.Builder
 	tx.WriteString(ytimage.DeleteAll())
 	for _, c := range cached {
 		tx.WriteString(c.transmitStr)
 	}
-	tx.WriteString(view)
-	return tx.String()
+	ytimage.RawWrite(tx.String())
+	return view
 }
 
 // Invalidate forces the next WrapView call to re-transmit all images.

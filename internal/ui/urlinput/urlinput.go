@@ -1,10 +1,10 @@
 package urlinput
 
 import (
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -111,7 +111,7 @@ func (m Model) View() string {
 	if inputWidth < 30 {
 		inputWidth = 30
 	}
-	m.input.Width = inputWidth
+	m.input.SetWidth(inputWidth)
 
 	title := styles.Title.Render("Open URL")
 	input := m.input.View()

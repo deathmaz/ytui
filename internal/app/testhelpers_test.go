@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/exp/teatest"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/exp/teatest/v2"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/config"
 	"github.com/deathmaz/ytui/internal/youtube"
@@ -129,14 +129,13 @@ func newTestMusicProgramFull(t *testing.T, ytClient *mockYTClient, musicClient *
 }
 
 func sendKey(tm *teatest.TestModel, key string) {
-	tm.Send(tea.KeyMsg{
-		Type:  tea.KeyRunes,
-		Runes: []rune(key),
-	})
+	for _, r := range key {
+		tm.Send(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
 }
 
-func sendSpecialKey(tm *teatest.TestModel, keyType tea.KeyType) {
-	tm.Send(tea.KeyMsg{Type: keyType})
+func sendSpecialKey(tm *teatest.TestModel, code rune) {
+	tm.Send(tea.KeyPressMsg{Code: code})
 }
 
 func waitForContent(t *testing.T, tm *teatest.TestModel, substring string) {
@@ -146,9 +145,25 @@ func waitForContent(t *testing.T, tm *teatest.TestModel, substring string) {
 	}, teatest.WithDuration(3*time.Second))
 }
 
+// waitForCounter polls an atomic counter until it reaches target or the
+// deadline elapses. Useful where the Cursed Renderer emits only cell diffs,
+// so the expected string may never appear as contiguous bytes in the output
+// stream even though the corresponding action fired.
+func waitForCounter(t *testing.T, c *atomic.Int32, target int32, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if c.Load() >= target {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("counter did not reach %d within %s (got %d)", target, timeout, c.Load())
+}
+
 func quitAndGetVideoModel(t *testing.T, tm *teatest.TestModel) *Model {
 	t.Helper()
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	tm.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	fm := tm.FinalModel(t, teatest.WithFinalTimeout(3*time.Second))
 	m, ok := fm.(*Model)
 	if !ok {
@@ -159,7 +174,7 @@ func quitAndGetVideoModel(t *testing.T, tm *teatest.TestModel) *Model {
 
 func quitAndGetMusicModel(t *testing.T, tm *teatest.TestModel) *MusicModel {
 	t.Helper()
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	tm.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	fm := tm.FinalModel(t, teatest.WithFinalTimeout(3*time.Second))
 	m, ok := fm.(*MusicModel)
 	if !ok {

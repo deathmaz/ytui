@@ -3,7 +3,7 @@ package shared
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
+	"charm.land/bubbles/v2/list"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
 

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
+	"charm.land/bubbles/v2/list"
 	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -27,9 +27,12 @@ func stabilize(tl *ThumbList, items []list.Item, view string) {
 	for i := 0; i < 5; i++ {
 		tl.WrapView(items, view)
 	}
+	drainRawCapture()
 }
 
 func TestWrapView_TransmitsOnFirstCall(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -39,7 +42,7 @@ func TestWrapView_TransmitsOnFirstCall(t *testing.T) {
 	items := testItems("http://thumb/a", "http://thumb/b")
 	deleteAll := ytimage.DeleteAll()
 
-	out := tl.WrapView(items, "VIEW")
+	out := wrapCap(rawCap, tl, items, "VIEW")
 	if !strings.Contains(out, deleteAll) {
 		t.Error("first call should contain DeleteAll")
 	}
@@ -52,6 +55,8 @@ func TestWrapView_TransmitsOnFirstCall(t *testing.T) {
 }
 
 func TestWrapView_RepeatsOnceThenSkips(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -60,20 +65,20 @@ func TestWrapView_RepeatsOnceThenSkips(t *testing.T) {
 	items := testItems("http://thumb/a")
 
 	// Frame 1: initial retransmit.
-	out1 := tl.WrapView(items, "V")
+	out1 := wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out1, "TX_A") {
 		t.Error("frame 1 should transmit")
 	}
 
 	// Frame 2: repeat retransmit (safety net).
-	out2 := tl.WrapView(items, "V")
+	out2 := wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out2, "TX_A") {
 		t.Error("frame 2 should repeat transmit")
 	}
 
 	// Frame 3+: stable skip.
 	for i := 0; i < 5; i++ {
-		out := tl.WrapView(items, "V")
+		out := wrapCap(rawCap, tl, items, "V")
 		if out != "V" {
 			t.Errorf("frame %d: expected plain view, got length %d", i+3, len(out))
 		}
@@ -81,6 +86,8 @@ func TestWrapView_RepeatsOnceThenSkips(t *testing.T) {
 }
 
 func TestWrapView_RetransmitsWhenNewImageLoads(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -94,20 +101,22 @@ func TestWrapView_RetransmitsWhenNewImageLoads(t *testing.T) {
 	// B loads — full retransmit with DeleteAll + all cached.
 	imgR.Store("http://thumb/b", "TX_B", "PL_B")
 
-	out := tl.WrapView(items, "V")
+	out := wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out, "TX_A") || !strings.Contains(out, "TX_B") {
 		t.Error("should retransmit all when new image loads")
 	}
 
 	// After stabilize, should skip.
 	stabilize(tl, items, "V")
-	out2 := tl.WrapView(items, "V")
+	out2 := wrapCap(rawCap, tl, items, "V")
 	if out2 != "V" {
 		t.Errorf("expected plain view after stabilize, got length %d", len(out2))
 	}
 }
 
 func TestWrapView_RetransmitsOnPageChange(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -118,7 +127,7 @@ func TestWrapView_RetransmitsOnPageChange(t *testing.T) {
 
 	stabilize(tl, testItems("http://thumb/a"), "V1")
 
-	out := tl.WrapView(testItems("http://thumb/x"), "V2")
+	out := wrapCap(rawCap, tl, testItems("http://thumb/x"), "V2")
 	if !strings.Contains(out, deleteAll) {
 		t.Error("page change should contain DeleteAll")
 	}
@@ -128,6 +137,8 @@ func TestWrapView_RetransmitsOnPageChange(t *testing.T) {
 }
 
 func TestWrapView_Invalidate(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -140,7 +151,7 @@ func TestWrapView_Invalidate(t *testing.T) {
 
 	tl.Invalidate()
 
-	out := tl.WrapView(items, "V")
+	out := wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out, deleteAll) {
 		t.Error("should contain DeleteAll after Invalidate")
 	}
@@ -150,6 +161,8 @@ func TestWrapView_Invalidate(t *testing.T) {
 }
 
 func TestWrapView_InvalidatePurgesOldImagesBeforeCacheReady(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -162,13 +175,15 @@ func TestWrapView_InvalidatePurgesOldImagesBeforeCacheReady(t *testing.T) {
 	tl.Invalidate()
 
 	// Uncached items: should still send DeleteAll to purge old images.
-	out := tl.WrapView(testItems("http://thumb/new"), "VB")
+	out := wrapCap(rawCap, tl, testItems("http://thumb/new"), "VB")
 	if !strings.Contains(out, deleteAll) {
 		t.Error("should send DeleteAll after Invalidate even with no cached images")
 	}
 }
 
 func TestWrapView_DeduplicatesSharedURLs(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -176,13 +191,15 @@ func TestWrapView_DeduplicatesSharedURLs(t *testing.T) {
 
 	items := testItems("http://thumb/a", "http://thumb/a")
 
-	out := tl.WrapView(items, "V")
+	out := wrapCap(rawCap, tl, items, "V")
 	if count := strings.Count(out, "TX_A"); count != 1 {
 		t.Errorf("expected TX_A exactly once, got %d times", count)
 	}
 }
 
 func TestWrapView_CrossThumbListDeleteAll(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tlA := NewThumbList(imgR, VideoThumbURL, 5)
 	tlB := NewThumbList(imgR, VideoThumbURL, 5)
@@ -194,17 +211,17 @@ func TestWrapView_CrossThumbListDeleteAll(t *testing.T) {
 	stabilize(tlA, testItems("http://thumb/a"), "VA")
 
 	// B transmits — sends DeleteAll which clears A's images from Kitty.
-	tlB.WrapView(testItems("http://thumb/x"), "VB")
+	_ = wrapCap(rawCap, tlB, testItems("http://thumb/x"), "VB")
 
 	// A renders again. Gen mismatch → must retransmit.
-	out := tlA.WrapView(testItems("http://thumb/a"), "VA")
+	out := wrapCap(rawCap, tlA, testItems("http://thumb/a"), "VA")
 	if !strings.Contains(out, "TX_A") {
 		t.Error("A must retransmit after B's DeleteAll cleared its images")
 	}
 
 	// Stabilize A, then confirm it skips.
 	stabilize(tlA, testItems("http://thumb/a"), "VA")
-	out2 := tlA.WrapView(testItems("http://thumb/a"), "VA")
+	out2 := wrapCap(rawCap, tlA, testItems("http://thumb/a"), "VA")
 	if out2 != "VA" {
 		t.Errorf("A should skip on stable frame, got length %d", len(out2))
 	}
@@ -213,6 +230,8 @@ func TestWrapView_CrossThumbListDeleteAll(t *testing.T) {
 // TestWrapView_DeleteStaleSentOnlyOnce verifies that after Invalidate with
 // uncached items, the bare DeleteAll is sent once, not on every frame.
 func TestWrapView_DeleteStaleSentOnlyOnce(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -225,14 +244,14 @@ func TestWrapView_DeleteStaleSentOnlyOnce(t *testing.T) {
 	deleteAll := ytimage.DeleteAll()
 
 	// First call: bare DeleteAll.
-	out1 := tl.WrapView(items, "V")
+	out1 := wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out1, deleteAll) {
 		t.Error("first call after Invalidate should send DeleteAll")
 	}
 
 	// Subsequent calls: no more DeleteAll until something changes.
 	for i := 0; i < 3; i++ {
-		out := tl.WrapView(items, "V")
+		out := wrapCap(rawCap, tl, items, "V")
 		if out != "V" {
 			t.Errorf("call %d: should return plain view, got length %d", i+2, len(out))
 		}
@@ -243,6 +262,8 @@ func TestWrapView_DeleteStaleSentOnlyOnce(t *testing.T) {
 // to a page where no images are cached yet sends a bare DeleteAll to purge
 // stale virtual placements from the previous page.
 func TestWrapView_PageScrollToUncachedSendsDeleteAll(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -257,20 +278,20 @@ func TestWrapView_PageScrollToUncachedSendsDeleteAll(t *testing.T) {
 	page2 := testItems("http://thumb/c", "http://thumb/d")
 	deleteAll := ytimage.DeleteAll()
 
-	out := tl.WrapView(page2, "V")
+	out := wrapCap(rawCap, tl, page2, "V")
 	if !strings.Contains(out, deleteAll) {
 		t.Error("scrolling to uncached page should send DeleteAll to clear old placements")
 	}
 
 	// Next frame: still no cached, should not send DeleteAll again.
-	out2 := tl.WrapView(page2, "V")
+	out2 := wrapCap(rawCap, tl, page2, "V")
 	if out2 != "V" {
 		t.Errorf("second call with same uncached page should skip, got length %d", len(out2))
 	}
 
 	// When first image loads, retransmit as usual.
 	imgR.Store("http://thumb/c", "TX_C", "PL_C")
-	out3 := tl.WrapView(page2, "V")
+	out3 := wrapCap(rawCap, tl, page2, "V")
 	if !strings.Contains(out3, "TX_C") {
 		t.Error("should retransmit when first page 2 image loads")
 	}
@@ -280,6 +301,8 @@ func TestWrapView_PageScrollToUncachedSendsDeleteAll(t *testing.T) {
 // 4 images loading one-by-one. Each new image triggers a retransmit
 // (DeleteAll + all cached so far) followed by a repeat frame.
 func TestWrapView_IncrementalLoading(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -288,48 +311,48 @@ func TestWrapView_IncrementalLoading(t *testing.T) {
 
 	// No images cached yet — first call sends DELETE_STALE (new ThumbList
 	// has lastDeleteGen=0), subsequent calls skip.
-	tl.WrapView(items, "V")
-	out := tl.WrapView(items, "V")
+	_ = wrapCap(rawCap, tl, items, "V")
+	out := wrapCap(rawCap, tl, items, "V")
 	if out != "V" {
 		t.Errorf("should skip with no cached images on second call, got length %d", len(out))
 	}
 
 	// Image A arrives.
 	imgR.Store("http://thumb/a", "TX_A", "PL_A")
-	out = tl.WrapView(items, "V")
+	out = wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out, deleteAll) || !strings.Contains(out, "TX_A") {
 		t.Error("should retransmit when first image loads")
 	}
 
 	// Image B arrives (during repeat window — fingerprint change resets counter).
 	imgR.Store("http://thumb/b", "TX_B", "PL_B")
-	out = tl.WrapView(items, "V")
+	out = wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out, "TX_A") || !strings.Contains(out, "TX_B") {
 		t.Error("should retransmit A+B when B loads")
 	}
 
 	// Image C arrives.
 	imgR.Store("http://thumb/c", "TX_C", "PL_C")
-	out = tl.WrapView(items, "V")
+	out = wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out, "TX_A") || !strings.Contains(out, "TX_B") || !strings.Contains(out, "TX_C") {
 		t.Error("should retransmit A+B+C when C loads")
 	}
 
 	// Image D arrives.
 	imgR.Store("http://thumb/d", "TX_D", "PL_D")
-	out = tl.WrapView(items, "V")
+	out = wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out, "TX_D") {
 		t.Error("should retransmit all when D loads")
 	}
 
 	// Repeat frame.
-	out = tl.WrapView(items, "V")
+	out = wrapCap(rawCap, tl, items, "V")
 	if !strings.Contains(out, "TX_A") || !strings.Contains(out, "TX_D") {
 		t.Error("repeat frame should retransmit all 4")
 	}
 
 	// Now stable.
-	out = tl.WrapView(items, "V")
+	out = wrapCap(rawCap, tl, items, "V")
 	if out != "V" {
 		t.Errorf("should be stable after all loaded + repeat, got length %d", len(out))
 	}
@@ -339,6 +362,8 @@ func TestWrapView_IncrementalLoading(t *testing.T) {
 // change during the repeat window resets the counter (doesn't consume
 // the repeat for stale data).
 func TestWrapView_FingerprintChangeDuringRepeat(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	imgR := ytimage.NewRenderer()
 	tl := NewThumbList(imgR, VideoThumbURL, 5)
 
@@ -346,16 +371,16 @@ func TestWrapView_FingerprintChangeDuringRepeat(t *testing.T) {
 	imgR.Store("http://thumb/x", "TX_X", "PL_X")
 
 	// Initial transmit for A.
-	tl.WrapView(testItems("http://thumb/a"), "V")
+	_ = wrapCap(rawCap, tl, testItems("http://thumb/a"), "V")
 
 	// Page change during repeat window.
-	out := tl.WrapView(testItems("http://thumb/x"), "V")
+	out := wrapCap(rawCap, tl, testItems("http://thumb/x"), "V")
 	if !strings.Contains(out, "TX_X") {
 		t.Error("page change during repeat should transmit X")
 	}
 
 	// Repeat for the NEW page (not the old one).
-	out2 := tl.WrapView(testItems("http://thumb/x"), "V")
+	out2 := wrapCap(rawCap, tl, testItems("http://thumb/x"), "V")
 	if !strings.Contains(out2, "TX_X") {
 		t.Error("repeat should retransmit X")
 	}
@@ -364,23 +389,27 @@ func TestWrapView_FingerprintChangeDuringRepeat(t *testing.T) {
 	}
 
 	// Now stable.
-	out3 := tl.WrapView(testItems("http://thumb/x"), "V")
+	out3 := wrapCap(rawCap, tl, testItems("http://thumb/x"), "V")
 	if out3 != "V" {
 		t.Errorf("should be stable, got length %d", len(out3))
 	}
 }
 
 func TestWrapView_NilThumbList(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	var tl *ThumbList
-	out := tl.WrapView(nil, "VIEW")
+	out := wrapCap(rawCap, tl, nil, "VIEW")
 	if out != "VIEW" {
 		t.Errorf("nil ThumbList should return view unchanged, got %q", out)
 	}
 }
 
 func TestWrapView_NilRenderer(t *testing.T) {
+
+	rawCap := installRawCapture(t)
 	tl := &ThumbList{}
-	out := tl.WrapView(nil, "VIEW")
+	out := wrapCap(rawCap, tl, nil, "VIEW")
 	if out != "VIEW" {
 		t.Errorf("nil renderer should return view unchanged, got %q", out)
 	}

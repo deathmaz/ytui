@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/deathmaz/ytui/internal/ui/styles"
 	"github.com/deathmaz/ytui/internal/youtube"
 )
@@ -98,8 +98,8 @@ func New(source string, loadFn LoadFunc, replyFn ReplyFunc) Model {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	m.Viewport.Width = w
-	m.Viewport.Height = h
+	m.Viewport.SetWidth(w)
+	m.Viewport.SetHeight(h)
 }
 
 // Load fetches the initial page of comments with the given token.
@@ -274,7 +274,7 @@ func (m *Model) moveCursor(delta int) {
 }
 
 func (m *Model) scrollToCursor() {
-	yOff := m.Viewport.YOffset
+	yOff := m.Viewport.YOffset()
 	vh := m.height
 	if m.cursorLine < yOff {
 		m.Viewport.SetYOffset(m.cursorLine)
