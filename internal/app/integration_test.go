@@ -3267,3 +3267,179 @@ func TestMusicMode_ArtistSubTab_Autoload(t *testing.T) {
 		})
 	}
 }
+
+// TestVideoMode_LoadCompletesAfterTabSwitch is a regression test for a bug
+// where opening a video tab and switching away before GetVideo resolves left
+// the detail view's spinner stuck forever. VideoLoadedMsg was routed only to
+// the active tab — when the user switched away, the message was dropped and
+// never reached the originating tab's detail.Model.
+func TestVideoMode_LoadCompletesAfterTabSwitch(t *testing.T) {
+	release := make(chan struct{})
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(ctx context.Context, id string) (*youtube.Video, error) {
+			<-release
+			return &youtube.Video{
+				ID:    id,
+				Title: "Loaded " + id,
+				URL:   "https://www.youtube.com/watch?v=" + id,
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+
+	// Open a video tab — getVideoFn blocks, so the tab is stuck loading.
+	tm.Send(shared.VideoSelectedMsg{Video: youtube.Video{ID: "vid1"}})
+	time.Sleep(150 * time.Millisecond)
+
+	// Switch away to the search view before the load resolves.
+	sendKey(tm, "/")
+	time.Sleep(150 * time.Millisecond)
+
+	// Release GetVideo — VideoLoadedMsg now fires while a different view is
+	// active. Must still reach the originating tab's detail model.
+	close(release)
+	time.Sleep(250 * time.Millisecond)
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.tabs.Len() < 1 {
+		t.Fatal("expected a video tab to remain open")
+	}
+	tab := m.tabs.At(0)
+	if tab == nil || tab.kind != tabVideo {
+		t.Fatalf("expected first tab to be a video tab, got %+v", tab)
+	}
+	if got := tab.detail.Video(); got == nil {
+		t.Fatal("video detail did not receive VideoLoadedMsg after tab switch — spinner would be stuck")
+	}
+}
+
+// TestMusicMode_SongLoadCompletesAfterTabSwitch mirrors the video-mode
+// regression test for the music-mode song tab path.
+func TestMusicMode_SongLoadCompletesAfterTabSwitch(t *testing.T) {
+	release := make(chan struct{})
+	ytc := &mockYTClient{
+		authenticated: true,
+		getVideoFn: func(ctx context.Context, id string) (*youtube.Video, error) {
+			<-release
+			return &youtube.Video{
+				ID:    id,
+				Title: "Loaded " + id,
+				URL:   "https://music.youtube.com/watch?v=" + id,
+			}, nil
+		},
+	}
+	mc := &mockMusicClient{authenticated: true}
+	tm := newTestMusicProgram(t, ytc, mc)
+
+	// Open a song tab via the internal selection message; GetVideo blocks.
+	tm.Send(musicItemSelectedMsg{item: youtube.MusicItem{
+		Type: youtube.MusicSong, Title: "", VideoID: "song1",
+	}})
+	time.Sleep(150 * time.Millisecond)
+
+	// Switch away to the search fixed view.
+	sendKey(tm, "/")
+	time.Sleep(150 * time.Millisecond)
+
+	// Release GetVideo — message arrives while the search view is active.
+	close(release)
+	time.Sleep(250 * time.Millisecond)
+
+	mm := quitAndGetMusicModel(t, tm)
+	if mm.tabs.Len() < 1 {
+		t.Fatal("expected a music song tab to remain open")
+	}
+	tab := mm.tabs.At(0)
+	if tab == nil || tab.kind != musicTabSong {
+		t.Fatalf("expected first tab to be a song tab, got %+v", tab)
+	}
+	if got := tab.songDetail.Video(); got == nil {
+		t.Fatal("song detail did not receive VideoLoadedMsg after tab switch — spinner would be stuck")
+	}
+}
+
+// TestVideoMode_ChannelLoadCompletesAfterTabSwitch verifies channel tab load
+// completions (DetailLoadedMsg + VideosLoadedMsg) still reach the originating
+// tab when the user switched to another view mid-load.
+func TestVideoMode_ChannelLoadCompletesAfterTabSwitch(t *testing.T) {
+	releaseDetail := make(chan struct{})
+	releaseVideos := make(chan struct{})
+	client := &mockYTClient{
+		authenticated: true,
+		getChannelFn: func(ctx context.Context, channelID string) (*youtube.ChannelDetail, error) {
+			<-releaseDetail
+			return &youtube.ChannelDetail{Channel: youtube.Channel{ID: channelID, Name: "Loaded Channel"}}, nil
+		},
+		getChannelVideosFn: func(ctx context.Context, channelID, token string) (*youtube.Page[youtube.Video], error) {
+			<-releaseVideos
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "cvid1", Title: "Channel Video 1", ChannelID: channelID}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+
+	tm.Send(subs.ChannelSelectedMsg{Channel: youtube.Channel{ID: "UCch1", Name: "Initial"}})
+	time.Sleep(150 * time.Millisecond)
+
+	sendKey(tm, "/")
+	time.Sleep(150 * time.Millisecond)
+
+	close(releaseDetail)
+	close(releaseVideos)
+	time.Sleep(300 * time.Millisecond)
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.tabs.Len() < 1 {
+		t.Fatal("expected a channel tab to remain open")
+	}
+	tab := m.tabs.At(0)
+	if tab == nil || tab.kind != tabChannel {
+		t.Fatalf("expected first tab to be a channel tab, got %+v", tab)
+	}
+	if tab.channel.Detail() == nil {
+		t.Error("channel Detail not loaded after tab switch — DetailLoadedMsg was dropped")
+	}
+	if tab.channel.SelectedVideo() == nil {
+		t.Error("channel videos not loaded after tab switch — VideosLoadedMsg was dropped")
+	}
+}
+
+// TestVideoMode_PlaylistLoadCompletesAfterTabSwitch verifies playlist tab load
+// (VideosLoadedMsg) still reaches the originating tab when the user switched
+// to another view mid-load.
+func TestVideoMode_PlaylistLoadCompletesAfterTabSwitch(t *testing.T) {
+	release := make(chan struct{})
+	client := &mockYTClient{
+		authenticated: true,
+		getPlaylistVideosFn: func(ctx context.Context, playlistID, token string) (*youtube.Page[youtube.Video], error) {
+			<-release
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "pvid1", Title: "Playlist Video 1"}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+
+	tm.Send(channel.PlaylistSelectedMsg{Playlist: youtube.Playlist{ID: "PL123", Title: "Initial"}})
+	time.Sleep(150 * time.Millisecond)
+
+	sendKey(tm, "/")
+	time.Sleep(150 * time.Millisecond)
+
+	close(release)
+	time.Sleep(300 * time.Millisecond)
+
+	m := quitAndGetVideoModel(t, tm)
+	if m.tabs.Len() < 1 {
+		t.Fatal("expected a playlist tab to remain open")
+	}
+	tab := m.tabs.At(0)
+	if tab == nil || tab.kind != tabPlaylist {
+		t.Fatalf("expected first tab to be a playlist tab, got %+v", tab)
+	}
+	if tab.playlist.SelectedVideo() == nil {
+		t.Error("playlist videos not loaded after tab switch — VideosLoadedMsg was dropped")
+	}
+}

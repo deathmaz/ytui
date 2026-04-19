@@ -276,6 +276,54 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case shared.VideoSelectedMsg:
 		return m, m.openVideoTab(&msg.Video)
 
+	case detail.VideoLoadedMsg:
+		// Dispatch to the originating tab — not the active tab — so the
+		// spinner clears even if the user switched away mid-load.
+		if msg.Video != nil {
+			if idx, found := m.tabs.Find(msg.Video.ID); found {
+				if tab := m.tabs.At(idx); tab != nil && tab.kind == tabVideo {
+					var cmd tea.Cmd
+					tab.detail, cmd = tab.detail.Update(msg)
+					if msg.Err == nil && tab.title == "" {
+						tab.title = msg.Video.Title
+					}
+					return m, cmd
+				}
+			}
+			return m, nil
+		}
+		// Error with nil Video carries no ID to route by. Deliver to the
+		// active video tab (if any) so the user sees the failure.
+		if m.activeView == ViewDynamicTab {
+			if tab := m.tabs.Active(); tab != nil && tab.kind == tabVideo {
+				var cmd tea.Cmd
+				tab.detail, cmd = tab.detail.Update(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
+
+	case channel.DetailLoadedMsg:
+		return m, m.routeChannelMsg(msg.ChannelID, msg)
+	case channel.VideosLoadedMsg:
+		return m, m.routeChannelMsg(msg.ChannelID, msg)
+	case channel.PlaylistsLoadedMsg:
+		return m, m.routeChannelMsg(msg.ChannelID, msg)
+	case channel.PostsLoadedMsg:
+		return m, m.routeChannelMsg(msg.ChannelID, msg)
+	case channel.StreamsLoadedMsg:
+		return m, m.routeChannelMsg(msg.ChannelID, msg)
+
+	case playlist.VideosLoadedMsg:
+		if idx, found := m.tabs.Find(msg.PlaylistID); found {
+			if tab := m.tabs.At(idx); tab != nil && tab.kind == tabPlaylist {
+				var cmd tea.Cmd
+				tab.playlist, cmd = tab.playlist.Update(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
+
 	case urlinput.SubmitMsg:
 		return m, m.openParsedURL(&msg.Parsed)
 
@@ -404,9 +452,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			switch tab.kind {
 			case tabVideo:
-				if vlm, ok := msg.(detail.VideoLoadedMsg); ok && vlm.Err == nil && vlm.Video != nil && tab.title == "" {
-					tab.title = vlm.Video.Title
-				}
 				tab.detail, cmd = tab.detail.Update(msg)
 			case tabChannel:
 				tab.channel, cmd = tab.channel.Update(msg)
@@ -457,6 +502,25 @@ func (m *Model) activeVideoTab() *dynamicTab {
 		return tab
 	}
 	return nil
+}
+
+// routeChannelMsg dispatches a channel-package load message to the channel
+// tab whose id matches channelID, regardless of whether that tab is active.
+func (m *Model) routeChannelMsg(channelID string, msg tea.Msg) tea.Cmd {
+	if channelID == "" {
+		return nil
+	}
+	idx, found := m.tabs.Find(channelID)
+	if !found {
+		return nil
+	}
+	tab := m.tabs.At(idx)
+	if tab == nil || tab.kind != tabChannel {
+		return nil
+	}
+	var cmd tea.Cmd
+	tab.channel, cmd = tab.channel.Update(msg)
+	return cmd
 }
 
 func (m *Model) openParsedURL(p *youtube.ParsedURL) tea.Cmd {

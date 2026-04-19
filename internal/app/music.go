@@ -252,6 +252,21 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, searchCmd
 	}
 
+	// Dispatch song load completions to the originating tab — not the
+	// active tab — so the spinner clears if the user switched away mid-load.
+	if vlm, ok := msg.(detail.VideoLoadedMsg); ok && vlm.Video != nil {
+		if idx, found := m.tabs.Find(vlm.Video.ID); found {
+			if t := m.tabs.At(idx); t != nil && t.kind == musicTabSong {
+				var cmd tea.Cmd
+				t.songDetail, cmd = t.songDetail.Update(msg)
+				if vlm.Err == nil && t.title == "" {
+					t.title = vlm.Video.Title
+				}
+				return m, cmd
+			}
+		}
+	}
+
 	// Delegate to song detail tab
 	if tab := m.activeTab(); tab != nil && tab.kind == musicTabSong {
 		handled := true
@@ -295,9 +310,6 @@ func (m *MusicModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			tab.songDetail, cmd = tab.songDetail.Update(msg)
 			cmds = append(cmds, cmd)
-			if vlm, ok := msg.(detail.VideoLoadedMsg); ok && vlm.Err == nil && vlm.Video != nil && tab.title == "" {
-				tab.title = vlm.Video.Title
-			}
 			return m, tea.Batch(cmds...)
 		}
 	}
