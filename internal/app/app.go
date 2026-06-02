@@ -187,19 +187,22 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// Modal handlers run before the type switch so non-key messages (e.g.
+	// tea.PasteMsg from bracketed paste) reach the active modal. handlePickerKey
+	// filters to tea.KeyMsg internally; handleURLInput only acts when active.
+	if cmd, handled := handlePickerKey(msg, &m.picker); handled {
+		return m, cmd
+	}
+	if cmd, handled := handleURLInput(msg, &m.urlInput); handled {
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		HandleWindowSize(msg, &m.width, &m.height, &m.help)
 		m.resizeViews()
 
 	case tea.KeyMsg:
-		if cmd, handled := handlePickerKey(msg, &m.picker); handled {
-			return m, cmd
-		}
-		if cmd, handled := handleURLInput(msg, &m.urlInput); handled {
-			return m, cmd
-		}
-
 		if searchFocusedCmd, ok := handleSearchFocused(msg, &m.search, m.activeView == ViewSearch, m.keys); ok {
 			return m, searchFocusedCmd
 		}

@@ -725,6 +725,96 @@ func TestVideoMode_URLInput_Cancel(t *testing.T) {
 	}
 }
 
+// TestVideoMode_URLInput_Paste guards the bracketed-paste regression: a
+// tea.PasteMsg (not a tea.KeyMsg) must reach the active URL modal so pasted
+// URLs land in the input and submit. Reverting the app.go routing fix (moving
+// handleURLInput out of the tea.KeyMsg case) drops the PasteMsg, leaving the
+// input empty so Enter opens no tab — failing this test.
+func TestVideoMode_URLInput_Paste(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		getVideoFn:    videoFactory("Pasted Video", nil),
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "O")
+	waitForContent(t, tm, "Open URL")
+	tm.Send(tea.PasteMsg{Content: "https://www.youtube.com/watch?v=fake_vid_001"})
+	time.Sleep(100 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEnter)
+	time.Sleep(200 * time.Millisecond)
+	m := quitAndGetVideoModel(t, tm)
+	if m.urlInput.IsActive() {
+		t.Error("URL input should close after submitting pasted URL")
+	}
+	if m.tabs.Len() != 1 {
+		t.Fatalf("expected 1 tab from pasted URL, got %d (paste dropped?)", m.tabs.Len())
+	}
+	if got := m.tabs.Active().id; got != "fake_vid_001" {
+		t.Errorf("expected tab for pasted video id fake_vid_001, got %q", got)
+	}
+}
+
+// TestMusicMode_URLInput_Paste is the music-mode parity guard for the same
+// paste routing. Music already routed PasteMsg correctly (handler outside the
+// type switch); this locks that behavior in.
+func TestMusicMode_URLInput_Paste(t *testing.T) {
+	ytClient := &mockYTClient{
+		authenticated: true,
+		getVideoFn:    videoFactory("Pasted Song", nil),
+	}
+	tm := newTestMusicProgram(t, ytClient, nil)
+	sendKey(tm, "O")
+	waitForContent(t, tm, "Open URL")
+	tm.Send(tea.PasteMsg{Content: "https://www.youtube.com/watch?v=fake_vid_002"})
+	time.Sleep(100 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEnter)
+	time.Sleep(200 * time.Millisecond)
+	m := quitAndGetMusicModel(t, tm)
+	if m.urlInput.IsActive() {
+		t.Error("URL input should close after submitting pasted URL")
+	}
+	if m.tabs.Len() != 1 {
+		t.Fatalf("expected 1 tab from pasted URL, got %d (paste dropped?)", m.tabs.Len())
+	}
+	if got := m.tabs.Active().browseID; got != "fake_vid_002" {
+		t.Errorf("expected tab for pasted video id fake_vid_002, got %q", got)
+	}
+}
+
+// TestVideoMode_URLInputOpen_StillResizes guards that opening the URL modal
+// does not swallow ambient messages: a window resize arriving while the modal
+// is open must still resize the views underneath. handleURLInput lets
+// tea.WindowSizeMsg flow through; if it consumed everything, m.width/m.height
+// would stay at the initial 80x24.
+func TestVideoMode_URLInputOpen_StillResizes(t *testing.T) {
+	tm := newTestVideoProgram(t, nil)
+	sendKey(tm, "O")
+	waitForContent(t, tm, "Open URL")
+	tm.Send(tea.WindowSizeMsg{Width: 100, Height: 40})
+	time.Sleep(100 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEscape) // close modal so Ctrl+C can quit
+	time.Sleep(100 * time.Millisecond)
+	m := quitAndGetVideoModel(t, tm)
+	if m.width != 100 || m.height != 40 {
+		t.Errorf("expected resize to apply while URL modal open, got %dx%d", m.width, m.height)
+	}
+}
+
+// TestMusicMode_URLInputOpen_StillResizes is the music-mode parity guard.
+func TestMusicMode_URLInputOpen_StillResizes(t *testing.T) {
+	tm := newTestMusicProgram(t, nil, nil)
+	sendKey(tm, "O")
+	waitForContent(t, tm, "Open URL")
+	tm.Send(tea.WindowSizeMsg{Width: 100, Height: 40})
+	time.Sleep(100 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEscape) // close modal so Ctrl+C can quit
+	time.Sleep(100 * time.Millisecond)
+	m := quitAndGetMusicModel(t, tm)
+	if m.width != 100 || m.height != 40 {
+		t.Errorf("expected resize to apply while URL modal open, got %dx%d", m.width, m.height)
+	}
+}
+
 func TestVideoMode_QualityPicker_Cancel(t *testing.T) {
 	tm := newTestVideoProgram(t, nil)
 	tm.Send(formatsLoadedMsg{
@@ -784,6 +874,55 @@ func TestVideoMode_SearchSubmitBlurs(t *testing.T) {
 	if !m.help.ShowAll {
 		t.Error("expected ? to toggle help after search submit (input should be blurred)")
 	}
+}
+
+// TestVideoMode_SearchInput_Paste guards bracketed paste into the focused
+// search input: a tea.PasteMsg must reach search.Model so the pasted query is
+// submitted. The default search view starts with the input focused. If paste
+// is dropped, the query is empty and the submit is a no-op (no results),
+// failing the waitForContent below.
+func TestVideoMode_SearchInput_Paste(t *testing.T) {
+	client := &mockYTClient{
+		authenticated: true,
+		searchFn: func(_ context.Context, query, _ string) (*youtube.Page[youtube.Video], error) {
+			return &youtube.Page[youtube.Video]{
+				Items: []youtube.Video{{ID: "sr1", Title: "Result for " + query}},
+			}, nil
+		},
+	}
+	tm := newTestVideoProgram(t, client)
+	sendKey(tm, "/") // focus the search input
+	time.Sleep(100 * time.Millisecond)
+	tm.Send(tea.PasteMsg{Content: "pasted query"})
+	time.Sleep(100 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Result for pasted query")
+	quitAndGetVideoModel(t, tm)
+}
+
+// TestMusicMode_SearchInput_Paste is the music-mode parity guard for paste into
+// the focused search input.
+func TestMusicMode_SearchInput_Paste(t *testing.T) {
+	mc := &mockMusicClient{
+		searchFn: func(_ context.Context, query, _ string) (*youtube.MusicSearchResult, error) {
+			return &youtube.MusicSearchResult{
+				TopResult: &youtube.MusicItem{
+					Title:    "Song for " + query,
+					Subtitle: "Artist",
+					Type:     youtube.MusicSong,
+					VideoID:  "ms1",
+				},
+			}, nil
+		},
+	}
+	tm := newTestMusicProgram(t, nil, mc)
+	sendKey(tm, "/") // focus the search input
+	time.Sleep(100 * time.Millisecond)
+	tm.Send(tea.PasteMsg{Content: "pasted song"})
+	time.Sleep(100 * time.Millisecond)
+	sendSpecialKey(tm, tea.KeyEnter)
+	waitForContent(t, tm, "Song for pasted song")
+	quitAndGetMusicModel(t, tm)
 }
 
 // === Priority 8: Cross-Mode Parity ===

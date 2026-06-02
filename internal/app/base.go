@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/deathmaz/ytui/internal/auth"
 	"github.com/deathmaz/ytui/internal/config"
+	ytimage "github.com/deathmaz/ytui/internal/image"
 	"github.com/deathmaz/ytui/internal/state"
 	"github.com/deathmaz/ytui/internal/ui/search"
 	"github.com/deathmaz/ytui/internal/ui/picker"
@@ -279,6 +280,16 @@ func handlePickerKey(msg tea.Msg, p *picker.Model) (tea.Cmd, bool) {
 // Returns (cmd, true) if handled, (nil, false) otherwise.
 func handleURLInput(msg tea.Msg, u *urlinput.Model) (tea.Cmd, bool) {
 	if !u.IsActive() {
+		return nil, false
+	}
+	// Let ambient messages flow through to the rest of Update even while the
+	// modal is open: window resizes must still resize the views underneath,
+	// and thumbnail-load completions must always reach the shared ThumbList
+	// (see the "route ThumbnailLoadedMsg regardless of active view" invariant).
+	// The modal doesn't consume these. All other messages — keys, paste, and
+	// the cursor blink ticks the input needs — are handled exclusively here.
+	switch msg.(type) {
+	case tea.WindowSizeMsg, ytimage.ThumbnailLoadedMsg:
 		return nil, false
 	}
 	updated, cmd := u.Update(msg)
