@@ -279,8 +279,15 @@ func enrichVideo(v *Video, raw map[string]interface{}) {
 			if sc := vsir.Get("owner.videoOwnerRenderer.subscriberCountText.simpleText"); sc.Exists() {
 				v.SubscriberCount = sc.String()
 			}
-			if desc := vsir.Get("attributedDescription.content"); desc.Exists() {
-				v.Description = desc.String()
+			// Prefer videoDetails.shortDescription (set by the caller): it is
+			// the raw description with full, unshortened URLs. attributedDescription.content
+			// is YouTube's display text where long links are truncated (e.g.
+			// "https://paypal.me/Foo?..."), which breaks the URLs. Only fall
+			// back to it when shortDescription was empty.
+			if v.Description == "" {
+				if desc := vsir.Get("attributedDescription.content"); desc.Exists() {
+					v.Description = desc.String()
+				}
 			}
 			// Signed-in user's subscription state for this video's channel.
 			// Unauthenticated responses omit the renderer, so a missing field

@@ -131,6 +131,50 @@ func TestEnrichVideo(t *testing.T) {
 	}
 }
 
+// TestEnrichVideo_KeepsFullDescription verifies that enrichVideo does NOT
+// overwrite a description already set from videoDetails.shortDescription (which
+// carries full, unshortened URLs) with attributedDescription.content (YouTube's
+// display text where long links are truncated to "...", breaking them).
+func TestEnrichVideo_KeepsFullDescription(t *testing.T) {
+	const fullDesc = "Support us:\nhttps://paypal.me/FakeChannel?country.x=US&locale.x=en_US\nContact: fake@example.com"
+	const truncatedDisplay = "Support us:\nhttps://paypal.me/FakeChannel?...\nContact: fake@example.com"
+
+	raw := map[string]interface{}{
+		"contents": map[string]interface{}{
+			"twoColumnWatchNextResults": map[string]interface{}{
+				"results": map[string]interface{}{
+					"results": map[string]interface{}{
+						"contents": []interface{}{
+							map[string]interface{}{
+								"videoSecondaryInfoRenderer": map[string]interface{}{
+									"attributedDescription": map[string]interface{}{
+										"content": truncatedDisplay,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// shortDescription already populated by the caller.
+	v := &Video{ID: "fake_vid_001", Description: fullDesc}
+	enrichVideo(v, raw)
+
+	if v.Description != fullDesc {
+		t.Errorf("enrichVideo overwrote full description with truncated display text:\n got:  %q\n want: %q", v.Description, fullDesc)
+	}
+
+	// Fallback: when shortDescription was empty, attributedDescription.content is used.
+	v2 := &Video{ID: "fake_vid_002"}
+	enrichVideo(v2, raw)
+	if v2.Description != truncatedDisplay {
+		t.Errorf("enrichVideo fallback failed:\n got:  %q\n want: %q", v2.Description, truncatedDisplay)
+	}
+}
+
 func TestFormatSeconds(t *testing.T) {
 	tests := []struct {
 		input string
